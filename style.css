@@ -460,3 +460,17 @@ td.cell.is-edited { background: #fff6e6; box-shadow: inset 0 0 0 1px var(--desir
   .blocks { grid-template-columns: 1fr; }
   .mline { grid-template-columns: 1.2rem 1fr 5rem; }
 }
+
+/* ===================== Lot E — Portefeuille ===================== */
+.pf-head { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); margin-bottom: 1rem; }
+.acc__head { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; }
+.acc__head h3 { margin: 0; }
+.acc__totals { display: flex; gap: 1.2rem; flex-wrap: wrap; margin: .5rem 0; font-size: .9rem; }
+.acc__coherence { display: flex; gap: 1rem; flex-wrap: wrap; font-size: .82rem; color: var(--ink-soft);
+  background: #f1f5f2; border-radius: 6px; padding: .5rem .7rem; margin-bottom: .6rem; }
+.acc .ledger { font-size: .8rem; }
+
+/* ===================== Lot F — Graphiques ===================== */
+.charts-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(320px,1fr)); }
+.charts-checks { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: .5rem 0 1rem; }
+.data-card canvas { max-width: 100%; }

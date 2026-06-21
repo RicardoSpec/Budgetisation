@@ -54,6 +54,8 @@
   let overlays = load(K.overlays, {});
   let tags     = load(K.tags, {});
   let tagBank  = load(K.bank, {});
+  let PF       = load(K.pf, { accounts: [] });
+  if (!PF.accounts) PF = { accounts: [] };
 
   // Banque d'étiquettes par catégorie (enrichie à la volée)
   const SEED_TAGS = {
@@ -137,7 +139,7 @@
         <span class="hint">Clique une cellule pour modifier le budget. Vide = retour à la valeur d'origine.</span>
       </div>`;
 
-    host.innerHTML = kpis + toolbar + ledgerAnnuel(y);
+    host.innerHTML = kpis + toolbar + ledgerAnnuel(y) + patrimoineBlock();
 
     el("#newYear").onclick = creerAnnee;
     el("#showAll").onchange = e => { showAllPostes = e.target.checked; renderDashboard(); };
@@ -356,10 +358,322 @@
       if (e.target.id==="mShowAll"){ showAllPostes=e.target.checked; renderMonth(); }
     });
   }
-  function renderPortfolio(){ el("[data-fill='portfolio']").innerHTML =
-    `<div class="empty"><h2>Portefeuille</h2><p>Import CSV multi-comptes (PEA, PEE, GreenGot, Coinbase…) et +/- values : lot E.</p></div>`; }
-  function renderCharts(){ el("[data-fill='charts']").innerHTML =
-    `<div class="empty"><h2>Graphiques</h2><p>Répartition du portefeuille, évolution de la trésorerie, projection 30 k€ : lot F.</p></div>`; }
+  /* ====================================================================
+     Portefeuille (Lot E)
+     ==================================================================== */
+  // Types de compte → poste budget pour le contrôle de cohérence
+  const TYPES_COMPTE = {
+    pea:        { label:"PEA",            poste:"pea" },
+    pee:        { label:"PEE",            poste:"pee" },
+    av_greengot:{ label:"Assurance-vie",  poste:"assuVieGreenGot" },
+    crypto:     { label:"Crypto",         poste:"coinbase" },
+    cto:        { label:"CTO",            poste:"cto" },
+    livret:     { label:"Livret",         poste:"ldds" },
+    autre:      { label:"Autre",          poste:"" },
+  };
+  let pfBound = false;
+
+  // --- Parseur CSV tolérant (FR) ---
+  function frNum(s){
+    if (s===null||s===undefined) return NaN;
+    let t = String(s).replace(/\u00a0/g," ").replace(/[€%\s]/g,"").trim();
+    if (t==="") return NaN;
+    const hasC = t.includes(","), hasD = t.includes(".");
+    if (hasC && hasD) t = t.replace(/\./g,"").replace(",","."); // . = milliers, , = décimal
+    else if (hasC) t = t.replace(",",".");                       // , = décimal
+    // sinon on garde le . tel quel
+    const n = parseFloat(t);
+    return isNaN(n) ? NaN : n;
+  }
+  function splitLine(line, delim){
+    const out=[]; let cur="", q=false;
+    for (let i=0;i<line.length;i++){ const c=line[i];
+      if (c==='"'){ if(q && line[i+1]==='"'){ cur+='"'; i++; } else q=!q; }
+      else if (c===delim && !q){ out.push(cur); cur=""; }
+      else cur+=c;
+    }
+    out.push(cur); return out.map(s=>s.trim());
+  }
+  function norm(s){ return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,""); }
+  function detectDelim(text){
+    const l = text.split(/\r?\n/).find(x=>x.trim()) || "";
+    const counts = { ";":(l.match(/;/g)||[]).length, "\t":(l.match(/\t/g)||[]).length, ",":(l.match(/,/g)||[]).length };
+    return Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0] || ";";
+  }
+  function parseCSV(text){
+    const delim = detectDelim(text);
+    const lines = text.split(/\r?\n/).filter(l=>l.trim()!=="");
+    if (!lines.length) return [];
+    // Trouver la ligne d'en-tête : celle contenant un mot-clé de libellé + un de valeur/quantité
+    const KW = {
+      label:["libelle","valeur","instrument","nom","support","fonds","actif","designation","titre"],
+      isin:["isin","code"],
+      qty:["quantite","qte","nombre","parts","nb","qty"],
+      pru:["pru","revient","achat","pmp","moyen"],
+      last:["cours","dernier","liquidative","vl","prix"],
+      value:["valorisation","montant","marche","evaluation","total","evalue"],
+      pv:["+/-","plus","pv","gain","latente","value"],
+    };
+    let hi=0, header=null;
+    for (let i=0;i<Math.min(lines.length,8);i++){
+      const cols = splitLine(lines[i],delim).map(norm);
+      const hasLabel = cols.some(c=>KW.label.some(k=>c.includes(k)));
+      const hasNum = cols.some(c=>[...KW.qty,...KW.value,...KW.last,...KW.pru].some(k=>c.includes(k)));
+      if (hasLabel && hasNum){ hi=i; header=cols; break; }
+    }
+    if (!header) header = splitLine(lines[0],delim).map(norm);
+    const find = keys => header.findIndex(c=>keys.some(k=>c.includes(k)));
+    const idx = {
+      label:find(KW.label), isin:find(KW.isin), qty:find(KW.qty),
+      pru:find(KW.pru), last:find(KW.last), value:find(KW.value), pv:find(KW.pv),
+    };
+    if (idx.label<0) idx.label = 0;
+    const rows=[];
+    for (let i=hi+1;i<lines.length;i++){
+      const c = splitLine(lines[i],delim);
+      const label = (c[idx.label]||"").trim();
+      if (!label) continue;
+      const qty = idx.qty>=0?frNum(c[idx.qty]):NaN;
+      const pru = idx.pru>=0?frNum(c[idx.pru]):NaN;
+      const last= idx.last>=0?frNum(c[idx.last]):NaN;
+      let value = idx.value>=0?frNum(c[idx.value]):NaN;
+      let pv    = idx.pv>=0?frNum(c[idx.pv]):NaN;
+      if (isNaN(value)) value = (!isNaN(qty)&&!isNaN(last))?qty*last : (!isNaN(qty)&&!isNaN(pru)?qty*pru:NaN);
+      if (isNaN(pv) && !isNaN(qty)&&!isNaN(pru)&&!isNaN(value)) pv = value - qty*pru;
+      if (isNaN(value)) continue;
+      rows.push({ label, isin:idx.isin>=0?(c[idx.isin]||"").trim():"", qty:isNaN(qty)?null:qty,
+                  pru:isNaN(pru)?null:pru, last:isNaN(last)?null:last, value, pv:isNaN(pv)?null:pv });
+    }
+    return rows;
+  }
+
+  // --- Agrégats compte ---
+  const accValue = a => a.positions&&a.positions.length ? a.positions.reduce((s,p)=>s+(p.value||0),0) : (a.manual?.value||0);
+  const accPV    = a => a.positions&&a.positions.length ? a.positions.reduce((s,p)=>s+(p.pv||0),0)
+                        : (a.manual && a.manual.invested!=null ? (a.manual.value||0)-(a.manual.invested||0) : 0);
+  const accCost  = a => accValue(a) - accPV(a);
+  function versementsCumul(posteId){
+    if (!posteId) return null;
+    let s=0; Object.keys(YEARS).map(Number).forEach(y=>{ for(let m=0;m<12;m++) s+=val(y,posteId,m); });
+    return s;
+  }
+
+  function renderPortfolio(){
+    const host = el("[data-fill='portfolio']");
+    const accs = PF.accounts;
+    const totalVal = accs.reduce((s,a)=>s+accValue(a),0);
+    const totalPV  = accs.reduce((s,a)=>s+accPV(a),0);
+
+    const cards = accs.map(a=>{
+      const v=accValue(a), pv=accPV(a), cost=accCost(a);
+      const vers = versementsCumul(a.poste);
+      const coh = vers!=null ? `
+        <div class="acc__coherence">
+          <span>Versements cumulés (budget) : <strong class="num">${fmt(vers)}</strong></span>
+          <span>Capital investi (réel) : <strong class="num">${fmt(cost)}</strong></span>
+          <span class="${Math.abs(vers-cost)<=Math.max(50,0.05*Math.abs(cost))?'pos':'neg'}">Écart : <strong class="num">${fmt(vers-cost)}</strong></span>
+        </div>` : "";
+      const posTable = (a.positions&&a.positions.length) ? `
+        <div class="ledger-wrap"><table class="ledger"><thead><tr>
+          <th>Ligne</th><th>Qté</th><th>PRU</th><th>Cours</th><th class="col-total">Valorisation</th><th>+/- value</th>
+        </tr></thead><tbody>
+        ${a.positions.map(p=>`<tr><th>${p.label}</th>
+          <td>${p.qty??""}</td><td>${p.pru!=null?fmt(p.pru):""}</td><td>${p.last!=null?fmt(p.last):""}</td>
+          <td class="col-total">${fmt(p.value)}</td><td class="${signe(p.pv||0)}">${p.pv!=null?fmt(p.pv):""}</td></tr>`).join("")}
+        </tbody></table></div>` : (a.manual ? `<p class="muted">Saisie manuelle : valeur ${fmt(a.manual.value)}${a.manual.invested!=null?` · investi ${fmt(a.manual.invested)}`:""}.</p>` : `<p class="muted">Aucune position importée.</p>`);
+      return `
+        <div class="data-card acc">
+          <div class="acc__head">
+            <div><h3>${a.name}</h3><span class="muted">${TYPES_COMPTE[a.type]?.label||a.type}${a.updatedAt?` · maj ${a.updatedAt}`:""}</span></div>
+            <button class="del" data-delacc="${a.id}">supprimer</button>
+          </div>
+          <div class="acc__totals">
+            <span>Valeur : <strong class="num">${fmt(v)}</strong></span>
+            <span>+/- value : <strong class="num ${signe(pv)}">${fmt(pv)}</strong></span>
+          </div>
+          ${coh}
+          ${posTable}
+          <div class="field" style="margin-top:.6rem">
+            <input type="file" accept=".csv,text/csv" data-csv="${a.id}">
+            <button class="btn btn--xs" data-import="${a.id}">Importer CSV</button>
+            <button class="btn btn--ghost btn--xs" data-manual="${a.id}">Saisie manuelle</button>
+          </div>
+          <p class="msg" data-accmsg="${a.id}"></p>
+        </div>`;
+    }).join("");
+
+    const typeOpts = Object.keys(TYPES_COMPTE).map(t=>`<option value="${t}">${TYPES_COMPTE[t].label}</option>`).join("");
+    host.innerHTML = `
+      <div class="pf-head">
+        <div class="kpi kpi--invest"><div class="kpi__label">Patrimoine total</div><div class="kpi__value num">${fmt(totalVal)}</div><div class="kpi__sub">${accs.length} compte(s)</div></div>
+        <div class="kpi ${totalPV>=0?'kpi--epargne':'kpi--desir'}"><div class="kpi__label">+/- value globale</div><div class="kpi__value num ${signe(totalPV)}">${fmt(totalPV)}</div><div class="kpi__sub">latente, tous comptes</div></div>
+      </div>
+      <div class="data-card" style="margin:1rem 0">
+        <h3>Ajouter un compte</h3>
+        <div class="field">
+          <input id="accName" placeholder="Nom (ex. PEA Boursobank)">
+          <select id="accType">${typeOpts}</select>
+          <button class="btn" id="addAcc">Ajouter</button>
+        </div>
+        <p class="muted">Tu pourras ensuite importer son CSV (PEA, PEE, GreenGot, Coinbase…). Le format est détecté automatiquement ; si une colonne manque, dis-le-moi et j'ajuste.</p>
+      </div>
+      <div class="data-grid">${cards || `<p class="muted">Aucun compte pour l'instant.</p>`}</div>`;
+
+    if (!pfBound){ pfBound=true; bindPortfolio(); }
+  }
+
+  function bindPortfolio(){
+    const panel = el("#panel-portfolio");
+    panel.addEventListener("click", e => {
+      const add = e.target.closest("#addAcc");
+      if (add){
+        const name=(el("#accName").value||"").trim(); if(!name) return;
+        const type=el("#accType").value;
+        PF.accounts.push({ id:"a"+Date.now(), name, type, poste:TYPES_COMPTE[type]?.poste||"", positions:[], manual:null, updatedAt:"" });
+        save(K.pf,PF); renderPortfolio(); return;
+      }
+      const del = e.target.closest("[data-delacc]");
+      if (del){ const id=del.dataset.delacc; if(confirm("Supprimer ce compte ?")){ PF.accounts=PF.accounts.filter(a=>a.id!==id); save(K.pf,PF); renderPortfolio(); renderDashboard(); } return; }
+
+      const imp = e.target.closest("[data-import]");
+      if (imp){
+        const id=imp.dataset.import, f=panel.querySelector(`[data-csv="${id}"]`).files[0];
+        const msg=panel.querySelector(`[data-accmsg="${id}"]`);
+        if(!f){ msg.className="msg err"; msg.textContent="Choisis un fichier CSV."; return; }
+        const r=new FileReader();
+        r.onload=()=>{ try{
+          const rows=parseCSV(r.result);
+          if(!rows.length){ msg.className="msg err"; msg.textContent="Aucune ligne reconnue. Envoie-moi l'en-tête du CSV et j'ajuste le parseur."; return; }
+          const a=PF.accounts.find(x=>x.id===id);
+          a.positions=rows; a.manual=null; a.updatedAt=new Date().toLocaleDateString("fr-FR");
+          save(K.pf,PF); renderPortfolio(); renderDashboard();
+        } catch{ msg.className="msg err"; msg.textContent="CSV illisible."; } };
+        r.readAsText(f,"utf-8");
+        return;
+      }
+      const man = e.target.closest("[data-manual]");
+      if (man){
+        const id=man.dataset.manual; const a=PF.accounts.find(x=>x.id===id);
+        const v=prompt("Valeur actuelle du compte (€) :", a.manual?.value??""); if(v===null) return;
+        const inv=prompt("Montant total investi (€, optionnel pour la +/- value) :", a.manual?.invested??"");
+        a.positions=[]; a.manual={ value:frNum(v)||0, invested: inv===null||inv===""?null:(frNum(inv)||0) };
+        a.updatedAt=new Date().toLocaleDateString("fr-FR");
+        save(K.pf,PF); renderPortfolio(); renderDashboard(); return;
+      }
+    });
+  }
+
+  // Bloc patrimoine injecté en bas du tableau de bord
+  function patrimoineBlock(){
+    const accs = PF.accounts; if(!accs.length) return "";
+    const totalVal=accs.reduce((s,a)=>s+accValue(a),0), totalPV=accs.reduce((s,a)=>s+accPV(a),0);
+    const maj = accs.map(a=>a.updatedAt).filter(Boolean).sort().slice(-1)[0] || "—";
+    const rows = accs.map(a=>{
+      const vers=versementsCumul(a.poste), cost=accCost(a);
+      const ec = vers!=null ? `<td class="${Math.abs(vers-cost)<=Math.max(50,0.05*Math.abs(cost))?'pos':'neg'}">${fmt(vers-cost)}</td>` : `<td class="muted">—</td>`;
+      return `<tr><th>${a.name}</th><td>${fmt(accValue(a))}</td><td class="${signe(accPV(a))}">${fmt(accPV(a))}</td>${ec}</tr>`;
+    }).join("");
+    return `
+      <section style="margin-top:1.5rem">
+        <h2 style="font-family:var(--display);font-size:1.3rem;margin-bottom:.5rem">Patrimoine <span class="muted" style="font-size:.8rem">· données au ${maj}</span></h2>
+        <div class="ledger-wrap"><table class="ledger"><thead><tr>
+          <th>Compte</th><th>Valeur</th><th>+/- value</th><th>Écart vs versements budget</th>
+        </tr></thead><tbody>${rows}
+        <tr class="total-row"><th>Total</th><td>${fmt(totalVal)}</td><td class="${signe(totalPV)}">${fmt(totalPV)}</td><td></td></tr>
+        </tbody></table></div>
+        <p class="muted" style="margin-top:.4rem">L'« écart » compare les versements cumulés saisis dans ton budget au capital réellement investi (valeur − plus-value). Proche de 0 = cohérent.</p>
+      </section>`;
+  }
+
+  /* ====================================================================
+     Graphiques (Lot F) — Chart.js
+     ==================================================================== */
+  const CHARTS = {};
+  let chartsSel = null;            // Set des postes sélectionnés (trésorerie)
+  const PALETTE = ["#3e5c76","#b07a2b","#2e6e5e","#6b4e9e","#355e3b","#a23b2c","#2b6cb0","#8a6d3b","#1f7a6b","#7d5ba6","#b5651d","#4a7c59"];
+
+  function destroyCharts(){ Object.values(CHARTS).forEach(c=>{ try{c.destroy();}catch{} }); }
+
+  function renderCharts(){
+    const host = el("[data-fill='charts']");
+    if (typeof Chart === "undefined"){ host.innerHTML = `<div class="empty"><p>Chargement de la bibliothèque de graphiques… réessaie dans un instant.</p></div>`; return; }
+    if (anneeCourante===null && !PF.accounts.length){ host.innerHTML = `<div class="empty"><p>Importe une année ou un compte pour voir des graphiques.</p></div>`; return; }
+    destroyCharts();
+
+    const y = anneeCourante;
+    // postes épargne+invest réellement utilisés cette année
+    const postesEpInv = y!=null ? [...postesGroupe("epargne"),...postesGroupe("invest")].filter(id=>posteUtilise(y,id)) : [];
+    if (chartsSel===null) chartsSel = new Set(postesEpInv);
+
+    const checks = postesEpInv.map(id=>`<label class="check"><input type="checkbox" data-selposte="${id}" ${chartsSel.has(id)?"checked":""}> ${POSTES[id].label}</label>`).join("");
+
+    host.innerHTML = `
+      <div class="charts-grid">
+        <div class="data-card">
+          <h3>Répartition du patrimoine</h3>
+          ${PF.accounts.length ? `<canvas id="cDonut" height="220"></canvas>` : `<p class="muted">Ajoute des comptes dans l'onglet Portefeuille pour voir la répartition.</p>`}
+        </div>
+        <div class="data-card">
+          <h3>Projection ${y??""} vers l'objectif 30 k€</h3>
+          ${y!=null ? `<canvas id="cProj" height="220"></canvas>` : `<p class="muted">Sélectionne une année.</p>`}
+        </div>
+      </div>
+      <div class="data-card" style="margin-top:1rem">
+        <h3>Évolution cumulée — épargne & investissement ${y??""}</h3>
+        <p class="muted">Cumul des versements mois après mois. Coche les postes à afficher.</p>
+        <div class="charts-checks">${checks||'<span class="muted">Aucun poste cette année.</span>'}</div>
+        ${y!=null ? `<canvas id="cTreso" height="260"></canvas>` : ""}
+      </div>`;
+
+    // --- Donut patrimoine ---
+    if (PF.accounts.length){
+      const accs = PF.accounts.filter(a=>accValue(a)>0);
+      CHARTS.donut = new Chart(el("#cDonut"), {
+        type:"doughnut",
+        data:{ labels:accs.map(a=>a.name), datasets:[{ data:accs.map(a=>Math.round(accValue(a))), backgroundColor:accs.map((_,i)=>PALETTE[i%PALETTE.length]), borderWidth:2, borderColor:"#fff" }] },
+        options:{ plugins:{ legend:{ position:"bottom" }, tooltip:{ callbacks:{ label:c=>`${c.label} : ${fmt(c.parsed)}` } } } }
+      });
+    }
+
+    // --- Évolution cumulée (lignes par poste sélectionné) ---
+    if (y!=null){
+      const sel = postesEpInv.filter(id=>chartsSel.has(id));
+      const datasets = sel.map((id,i)=>{
+        let cum=0; const d=[];
+        for(let m=0;m<12;m++){ cum+=val(y,id,m); d.push(Math.round(cum)); }
+        const col=PALETTE[i%PALETTE.length];
+        return { label:POSTES[id].label, data:d, borderColor:col, backgroundColor:col+"22", tension:.25, pointRadius:2, fill:false };
+      });
+      CHARTS.treso = new Chart(el("#cTreso"), {
+        type:"line",
+        data:{ labels:MOIS.map(m=>m.slice(0,3)), datasets },
+        options:{ interaction:{mode:"index",intersect:false}, plugins:{ legend:{position:"bottom"}, tooltip:{ callbacks:{ label:c=>`${c.dataset.label} : ${fmt(c.parsed.y)}` } } },
+          scales:{ y:{ ticks:{ callback:v=>fmtNb.format(v)+" €" } } } }
+      });
+
+      // --- Projection 30k ---
+      const base = YEARS[y].soldeDepart || 0;
+      const proj=[]; let cum=base;
+      for(let m=0;m<12;m++){ cum += totalGroupeMois(y,"epargne",m)+totalGroupeMois(y,"invest",m); proj.push(Math.round(cum)); }
+      const cible = Array(12).fill(30000);
+      const finVal = proj[11];
+      CHARTS.proj = new Chart(el("#cProj"), {
+        type:"line",
+        data:{ labels:MOIS.map(m=>m.slice(0,3)), datasets:[
+          { label:"Capital cumulé (budget)", data:proj, borderColor:"#6b4e9e", backgroundColor:"#6b4e9e22", fill:true, tension:.25, pointRadius:2 },
+          { label:"Objectif 30 k€", data:cible, borderColor:"#b07a2b", borderDash:[6,4], pointRadius:0, fill:false },
+        ]},
+        options:{ plugins:{ legend:{position:"bottom"},
+          tooltip:{ callbacks:{ label:c=>`${c.dataset.label} : ${fmt(c.parsed.y)}` } },
+          subtitle:{ display:true, text:`Fin ${y} estimée : ${fmt(finVal)} — ${finVal>=30000?"objectif atteint 🎯":"il manque "+fmt(30000-finVal)}`, color: finVal>=30000?"#2e6e5e":"#b23a28", font:{size:13,weight:"bold"} } },
+          scales:{ y:{ ticks:{ callback:v=>fmtNb.format(v)+" €" } } } }
+      });
+    }
+
+    el("#panel-charts").querySelectorAll("[data-selposte]").forEach(cb=>{
+      cb.onchange = () => { const id=cb.dataset.selposte; cb.checked?chartsSel.add(id):chartsSel.delete(id); renderCharts(); };
+    });
+  }
 
   /* ====================================================================
      Onglet Données : import par année + sauvegarde globale
@@ -443,7 +757,7 @@
 
     // Sauvegarde globale
     el("#doExport").onclick = () => {
-      const blob = new Blob([JSON.stringify({ years:YEARS, overlays, tags, tagBank }, null, 2)], { type:"application/json" });
+      const blob = new Blob([JSON.stringify({ years:YEARS, overlays, tags, tagBank, portfolio:PF }, null, 2)], { type:"application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = `grand-livre-sauvegarde-${new Date().toISOString().slice(0,10)}.json`;
@@ -461,6 +775,7 @@
           if (d.overlays) { overlays=d.overlays; save(K.overlays,overlays); }
           if (d.tags) { tags=d.tags; save(K.tags,tags); }
           if (d.tagBank) { tagBank=d.tagBank; save(K.bank,tagBank); }
+          if (d.portfolio) { PF=d.portfolio; if(!PF.accounts) PF={accounts:[]}; save(K.pf,PF); }
           refreshAnnees(); msg.className="msg ok"; msg.textContent="Sauvegarde restaurée.";
           initYearSelect(); renderAll();
         } catch { msg.className="msg err"; msg.textContent="Fichier de sauvegarde illisible."; }

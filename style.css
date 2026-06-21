@@ -20,6 +20,7 @@
   --besoin:     #3e5c76;   /* ardoise */
   --desir:      #b07a2b;   /* ocre */
   --epargne:    #2e6e5e;   /* pin */
+  --invest:     #6b4e9e;   /* prune — investissement */
   --revenu:     #355e3b;   /* vert sombre pour les entrées */
 
   /* Signe */
@@ -67,33 +68,45 @@ a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset:
 .neg { color: var(--neg); }
 .muted { color: var(--ink-faint); }
 
-/* ----------------------- Barre des apps ----------------------- */
+/* ----------------------- Barre supérieure (hamburger) ----------------------- */
 .appbar {
-  display: flex; align-items: center; gap: 1rem;
-  padding: .55rem 1.25rem;
-  background: var(--ink);
-  color: var(--accent-ink);
+  display: flex; align-items: center; gap: .75rem;
+  padding: .55rem 1rem;
+  background: var(--ink); color: var(--accent-ink);
   position: sticky; top: 0; z-index: 50;
 }
-.appbar__brand {
-  font-family: var(--display); font-weight: 600; font-size: 1rem;
-  letter-spacing: .12em; border: 1px solid rgba(251,252,251,.35);
-  padding: .15rem .5rem; border-radius: var(--radius);
+.burger {
+  appearance: none; background: transparent; border: 0; cursor: pointer;
+  width: 2.1rem; height: 2.1rem; padding: .45rem; border-radius: var(--radius);
+  display: flex; flex-direction: column; justify-content: space-between;
 }
-.appbar__apps {
-  display: flex; flex-wrap: wrap; gap: .25rem; align-items: center;
-  list-style: none; margin: 0; padding: 0;
+.burger span {
+  display: block; height: 2px; width: 100%; background: var(--accent-ink);
+  border-radius: 2px; transition: transform .2s, opacity .2s;
 }
-.appbar__apps a, .appbar__soon {
-  display: inline-block; padding: .3rem .7rem; border-radius: var(--radius);
-  font-size: .85rem; color: rgba(251,252,251,.82); text-decoration: none;
-  transition: background .15s, color .15s;
+.burger:hover { background: rgba(251,252,251,.12); }
+.burger.is-open span:nth-child(1) { transform: translateY(5.5px) rotate(45deg); }
+.burger.is-open span:nth-child(2) { opacity: 0; }
+.burger.is-open span:nth-child(3) { transform: translateY(-5.5px) rotate(-45deg); }
+.appbar__here { font-family: var(--display); font-size: 1.05rem; font-weight: 600; }
+
+.appmenu {
+  position: absolute; top: calc(100% + 6px); left: .75rem;
+  min-width: 230px; background: var(--card); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  box-shadow: 0 8px 30px rgba(22,48,43,.18); padding: .35rem; margin: 0; list-style: none;
+  z-index: 60;
 }
-.appbar__apps a:hover { background: rgba(251,252,251,.12); color: #fff; }
-.appbar__apps a.is-current {
-  background: var(--accent-ink); color: var(--ink); font-weight: 600;
+.appmenu[hidden] { display: none; }
+.appmenu__title { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-faint); padding: .45rem .6rem .25rem; }
+.appmenu a, .appmenu__soon {
+  display: block; padding: .5rem .6rem; border-radius: var(--radius);
+  text-decoration: none; color: var(--ink); font-size: .92rem;
 }
-.appbar__soon { color: rgba(251,252,251,.4); cursor: not-allowed; }
+.appmenu a:hover { background: #eef2f0; }
+.appmenu a.is-current { font-weight: 600; color: var(--accent); }
+.appmenu__soon { color: var(--ink-faint); cursor: not-allowed; }
+.appmenu__sep { height: 1px; background: var(--rule); margin: .35rem .4rem; }
 
 /* ----------------------- En-tête de l'app ----------------------- */
 .masthead {
@@ -316,3 +329,43 @@ a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset:
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ===================== Compléments Lot A ===================== */
+
+/* Couleur Investissement sur les composants existants */
+.kpi--invest { border-left: 3px solid var(--invest); }
+.dot--invest { background: var(--invest); }
+.ledger .group-row.is-invest th { color: var(--invest); }
+.block--invest .block__head { border-color: var(--invest); }
+.block--invest .block__title { color: var(--invest); }
+.tags--invest .tag.is-on { background: var(--invest); border-color: var(--invest); }
+
+/* Colonne Total mise en évidence dans le grand livre */
+.ledger th.col-total, .ledger td.col-total {
+  background: #e4ebe7; font-weight: 700;
+  border-left: 2px solid var(--rule-strong);
+}
+.ledger thead th.col-total { color: var(--ink); }
+.ledger tr:hover td.col-total { background: #dde6e1; }
+
+/* État vide (aucune année importée) */
+.empty {
+  text-align: center; padding: 3rem 1rem; color: var(--ink-soft);
+  background: var(--card); border: 1px dashed var(--rule-strong); border-radius: var(--radius);
+}
+.empty h2 { font-size: 1.5rem; color: var(--ink); margin-bottom: .5rem; }
+.empty .btn { margin-top: 1rem; }
+
+/* Onglet Données */
+.data-grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.data-card { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 1.1rem 1.2rem; box-shadow: var(--shadow); }
+.data-card h3 { font-size: 1.05rem; margin-bottom: .4rem; }
+.data-card p { color: var(--ink-soft); font-size: .88rem; margin: .3rem 0 .8rem; }
+.field { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
+.field select, .field input[type=file] { font-size: .9rem; }
+.year-list { list-style: none; padding: 0; margin: .5rem 0 0; }
+.year-list li { display: flex; align-items: center; justify-content: space-between; padding: .4rem .2rem; border-bottom: 1px solid var(--rule); font-family: var(--mono); }
+.year-list .del { color: var(--neg); cursor: pointer; background: none; border: 0; font-size: .85rem; }
+.msg { font-size: .85rem; margin-top: .5rem; }
+.msg.ok { color: var(--pos); }
+.msg.err { color: var(--neg); }

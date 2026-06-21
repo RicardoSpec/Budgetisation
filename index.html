@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Grand livre — Budget</title>
+<link rel="icon" href="favicon.ico" sizes="any">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -11,15 +12,20 @@
 </head>
 <body>
 
-<!-- ============ Barre de menu : navigation entre les apps ============ -->
-<nav class="appbar" aria-label="Mes applications">
-  <span class="appbar__brand">RS</span>
-  <ul class="appbar__apps">
+<!-- ============ Barre supérieure : menu hamburger + apps ============ -->
+<nav class="appbar" aria-label="Navigation des applications">
+  <button class="burger" id="burger" aria-label="Ouvrir le menu" aria-expanded="false" aria-controls="appmenu">
+    <span></span><span></span><span></span>
+  </button>
+  <span class="appbar__here">Budget</span>
+  <ul class="appmenu" id="appmenu" hidden>
+    <li class="appmenu__title">Mes applications</li>
     <li><a href="https://ricardospec.github.io/coachmuscu/">Coachmuscu</a></li>
-    <li><a href="https://ricardospec.github.io/Mouche-Universit-/">Mouche&nbsp;Université</a></li>
-    <li><a href="https://ricardospec.github.io/Lateliergram/">L'atelier&nbsp;gram</a></li>
-    <li><a href="https://ricardospec.github.io/English-Fly/">English&nbsp;Fly</a></li>
-    <li><span class="appbar__soon" aria-disabled="true" title="Bientôt disponible">Espagnol</span></li>
+    <li><a href="https://ricardospec.github.io/Mouche-Universit-/">Mouche Université</a></li>
+    <li><a href="https://ricardospec.github.io/Lateliergram/">L'atelier gram</a></li>
+    <li><a href="https://ricardospec.github.io/English-Fly/">English Fly</a></li>
+    <li><span class="appmenu__soon">Espagnol — à venir</span></li>
+    <li class="appmenu__sep"></li>
     <li><a href="index.html" aria-current="page" class="is-current">Budget</a></li>
   </ul>
 </nav>
@@ -27,8 +33,8 @@
 <!-- ============ En-tête de l'app ============ -->
 <header class="masthead">
   <div class="masthead__title">
-    <h1>Grand&nbsp;livre</h1>
-    <p class="masthead__sub">Suivi de budget personnel · Besoins · Désirs · Épargne</p>
+    <h1>Grand livre</h1>
+    <p class="masthead__sub">Budget personnel · Besoins · Désirs · Épargne · Investissement</p>
   </div>
   <div class="masthead__year">
     <label for="yearSelect" class="visually-hidden">Choisir l'année</label>
@@ -41,51 +47,27 @@
   <button class="tab is-active" data-tab="dashboard">Tableau de bord</button>
   <button class="tab" data-tab="month">Mois</button>
   <button class="tab" data-tab="portfolio">Portefeuille</button>
-  <button class="tab" data-tab="import">Import</button>
-  <button class="tab" data-tab="backup">Sauvegarde</button>
+  <button class="tab" data-tab="charts">Graphiques</button>
+  <button class="tab" data-tab="data">Données</button>
 </nav>
 
 <!-- ============ Contenu (rempli par app.js) ============ -->
 <main class="page">
-
-  <section class="panel is-active" id="panel-dashboard" aria-label="Tableau de bord">
-    <div class="placeholder" data-fill="dashboard">Chargement du tableau de bord…</div>
-  </section>
-
-  <section class="panel" id="panel-month" aria-label="Détail du mois">
-    <div class="placeholder" data-fill="month">Sélectionnez un mois pour commencer.</div>
-  </section>
-
-  <section class="panel" id="panel-portfolio" aria-label="Portefeuille">
-    <div class="placeholder" data-fill="portfolio">
-      <h2>Portefeuille</h2>
-      <p>Le module de positions et de suivi des +/- values arrive à la prochaine étape,
-         avec l'import de ton export CSV Boursorama.</p>
-    </div>
-  </section>
-
-  <section class="panel" id="panel-import" aria-label="Import de données">
-    <div class="placeholder" data-fill="import">Module d'import…</div>
-  </section>
-
-  <section class="panel" id="panel-backup" aria-label="Sauvegarde">
-    <div class="placeholder" data-fill="backup">Module de sauvegarde…</div>
-  </section>
-
+  <section class="panel is-active" id="panel-dashboard" aria-label="Tableau de bord"><div data-fill="dashboard"></div></section>
+  <section class="panel" id="panel-month" aria-label="Détail du mois"><div data-fill="month"></div></section>
+  <section class="panel" id="panel-portfolio" aria-label="Portefeuille"><div data-fill="portfolio"></div></section>
+  <section class="panel" id="panel-charts" aria-label="Graphiques"><div data-fill="charts"></div></section>
+  <section class="panel" id="panel-data" aria-label="Données"><div data-fill="data"></div></section>
 </main>
 
 <footer class="footnote">
-  <p>Tes données restent dans ce navigateur. Rien n'est envoyé en ligne. Pense à exporter une sauvegarde régulièrement.</p>
+  <p>Tes données restent dans ce navigateur. Rien n'est envoyé en ligne. Pense à exporter une sauvegarde globale régulièrement depuis l'onglet « Données ».</p>
 </footer>
 
-<!-- ============ Données : un fichier par année ============ -->
-<!-- Chargés avant app.js. data-2026 viendra quand le tableur 17jg sera fourni. -->
-<script src="data-2022.js"></script>
-<script src="data-2024.js"></script>
-<script src="data-2025.js"></script>
-
-<!-- ============ Logique ============ -->
-<script src="app.js"></script>
+<!-- Chart.js (utilisé par l'onglet Graphiques) -->
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- Logique de l'app (aucune donnée n'est embarquée dans le dépôt) -->
+<script defer src="app.js"></script>
 
 </body>
 </html>

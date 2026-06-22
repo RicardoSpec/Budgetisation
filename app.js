@@ -222,8 +222,29 @@
   /* ====================================================================
      Vue mensuelle (Lot D)
      ==================================================================== */
-  const EXPANDED = new Set();   // postes dépliés (mémoire de session)
+  /* ====================================================================
+     Vue mensuelle (Lot G) — Prévu (renvoi tableau de bord) / Réel (étiquettes) / Écart
+     ==================================================================== */
+  const EXPANDED = new Set();
   let monthBound = false;
+
+  // Réel d'un poste = somme des étiquettes ; sinon valeur importée (réalisé historique).
+  function reelVal(y,id,m){ const s=tagsSum(y,m,id); if(s!==null) return s; const b=base(y,id,m); return b===null?0:b; }
+  function reelGroupeMois(y,g,m){ return postesGroupe(g).reduce((s,id)=>s+reelVal(y,id,m),0); }
+
+  // Solde du compte : réalisé (historique importé) pour passé/en cours, prévisionnel ensuite.
+  function moisCourantReel(y){ const n=new Date(),cy=n.getFullYear(); if(y<cy) return 11; if(y>cy) return -1; return n.getMonth(); }
+  function netMois(y,m){ return totalGroupeMois(y,"revenu",m)-totalGroupeMois(y,"besoin",m)-totalGroupeMois(y,"desir",m)-totalGroupeMois(y,"epargne",m)-totalGroupeMois(y,"invest",m); }
+  function soldeBanque(y){
+    const dep=YEARS[y].soldeDepart||0, sr=YEARS[y].soldeReel||[], cmi=moisCourantReel(y);
+    const bal=[]; let anchor=dep;
+    for(let m=0;m<12;m++){
+      const realized = (sr[m]!==null&&sr[m]!==undefined) && (cmi===11 || m<=cmi);
+      if(realized){ bal[m]=sr[m]; anchor=sr[m]; }
+      else { anchor += netMois(y,m); bal[m]=anchor; }
+    }
+    return { bal, cmi };
+  }
 
   function renderMonth(){
     const host = el("[data-fill='month']");
@@ -231,47 +252,72 @@
     const y = anneeCourante, m = moisCourant;
 
     const chips = MOIS.map((mn,i)=>`<button class="mchip ${i===m?'is-active':''}" data-month="${i}">${mn.slice(0,3)}</button>`).join("");
-    const reel = (YEARS[y].soldeReel||[])[m];
     const caption = `
       <div class="month-caption">
         <span class="month-caption__name">${MOIS[m]} ${y}</span>
-        ${reel!==null&&reel!==undefined ? `<span class="month-caption__reel">solde réel fin de mois&nbsp;: <strong class="num ${signe(reel)}">${fmt(reel)}</strong></span>`:""}
         <label class="check"><input type="checkbox" id="mShowAll" ${showAllPostes?"checked":""}> tous les postes</label>
       </div>`;
 
-    host.innerHTML = `<div class="mchips" role="tablist">${chips}</div>${caption}<div class="blocks">${ORDRE.map(g=>blockHtml(y,m,g)).join("")}</div>`;
+    const blocks = ORDRE.map(g=>blockHtml(y,m,g)).join("");
 
+    // Synthèse + solde du compte sous le mois
+    const { bal, cmi } = soldeBanque(y);
+    const solde = bal[m];
+    const realizedM = (cmi===11) || (m<=cmi);
+    let resteP=0, resteR=0;
+    ["besoin","desir","epargne","invest"].forEach(g=>postesGroupe(g).forEach(id=>{ const e=val(y,id,m)-reelVal(y,id,m); if(e>0) resteP+=e; }));
+    postesGroupe("revenu").forEach(id=>{ const e=val(y,id,m)-reelVal(y,id,m); if(e>0) resteR+=e; });
+    const summary = `
+      <section class="month-summary">
+        <div class="ms-card ms-card--solde">
+          <span class="ms-card__label">Solde du compte · fin ${MOIS[m]}</span>
+          <strong class="num ${signe(solde)}">${fmt(solde)}</strong>
+          <em class="ms-card__tag">${realizedM?"réalisé":"prévisionnel"}</em>
+        </div>
+        <div class="ms-card"><span class="ms-card__label">Reste à payer</span><strong class="num">${fmt(resteP)}</strong></div>
+        <div class="ms-card"><span class="ms-card__label">Reste à recevoir</span><strong class="num">${fmt(resteR)}</strong></div>
+      </section>`;
+
+    host.innerHTML = `<div class="mchips" role="tablist">${chips}</div>${caption}<div class="blocks">${blocks}</div>${summary}`;
     if (!monthBound) { monthBound = true; bindMonth(); }
   }
 
   function blockHtml(y,m,g){
     const ids = postesGroupe(g).filter(id => showAllPostes || posteUtilise(y,id) || base(y,id,m)!==null);
-    const total = totalGroupeMois(y,g,m);
-    const lines = ids.length ? ids.map(id=>lineHtml(y,m,id,g)).join("") : `<p class="muted" style="padding:.4rem .2rem">Aucun poste — coche « tous les postes » pour en ajouter.</p>`;
+    const reelG = reelGroupeMois(y,g,m), prevuG = totalGroupeMois(y,g,m);
+    const bubbles = ids.length ? ids.map(id=>bubbleHtml(y,m,id,g)).join("") : `<p class="muted" style="padding:.4rem .2rem">Aucun poste — coche « tous les postes » pour en ajouter.</p>`;
     return `
       <section class="mblock mblock--${g}">
         <header class="mblock__head">
           <span class="mblock__title">${GROUPES[g].label}</span>
-          <span class="mblock__sum num ${signe(total)}">${fmt(total)}</span>
+          <span class="mblock__sum"><span class="num ${signe(reelG)}">${fmt(reelG)}</span> <span class="mblock__prevu">/ ${fmt(prevuG)}</span></span>
         </header>
-        <div class="mblock__body">${lines}</div>
+        <div class="mblock__body">${bubbles}</div>
       </section>`;
   }
 
-  function lineHtml(y,m,id,g){
-    const v = valDisplay(y,id,m);
-    const open = EXPANDED.has(id);
-    const bag = (tags[y]&&tags[y][m]&&tags[y][m][id]) || {};
-    const nbTags = Object.keys(bag).length;
-    const edited = hasOverlay(y,id,m) ? " is-edited" : "";
+  function bubbleHtml(y,m,id,g){
+    const prevu = val(y,id,m);
+    const reel  = reelVal(y,id,m);
+    const ecart = prevu - reel;
+    const open  = EXPANDED.has(id);
+    const bag   = (tags[y]&&tags[y][m]&&tags[y][m][id]) || {};
+    const nb    = Object.keys(bag).length;
+    const over  = reel > prevu;
+    const resteLabel = g==="revenu" ? (over?"reçu en plus":"reste à recevoir") : (over?"dépassement":"reste à payer");
     const detail = open ? tagDetail(y,m,id,g,bag) : "";
     return `
-      <div class="mline${open?' is-open':''}" data-line="${id}">
-        <button class="mline__chevron" data-toggle="${id}" aria-label="Détail">▸</button>
-        <span class="mline__label" data-toggle="${id}">${POSTES[id].label}${nbTags?` <span class="mline__badge">${nbTags}</span>`:""}</span>
-        <input class="mline__amount${edited} ${signe(v||0)}" data-amount="${id}" inputmode="decimal" value="${v===null?"":v}" aria-label="Montant ${POSTES[id].label}">
-      </div>
-      ${detail}`;
+      <div class="bubble bubble--${g}${open?' is-open':''}">
+        <button class="bubble__head" data-toggle="${id}" aria-expanded="${open}">
+          <span class="bubble__name">${POSTES[id].label}${nb?` <span class="mline__badge">${nb}</span>`:""}</span>
+          <span class="bubble__prevu">prévu <strong class="num">${fmt(prevu)}</strong> <span class="bubble__chev">▸</span></span>
+        </button>
+        ${detail}
+        <div class="bubble__foot">
+          <span class="bubble__reel">réel <strong class="num ${signe(reel)}">${fmt(reel)}</strong></span>
+          <span class="bubble__ecart ${over?'neg':'pos'}">${resteLabel} <strong class="num">${fmt(Math.abs(ecart))}</strong></span>
+        </div>
+      </div>`;
   }
 
   function tagDetail(y,m,id,g,bag){
@@ -284,13 +330,10 @@
         <button class="tagrow__del" data-tagdel="${id}|${label}" aria-label="Retirer">×</button>
       </div>`;
     }).join("");
-    const somme = tagsSum(y,m,id);
-    const sumLine = somme!==null ? `<div class="tagsum"><span>Σ étiquettes</span><strong class="num ${signe(somme)}">${fmt(somme)}</strong><button class="btn btn--ghost btn--xs" data-apply="${id}">appliquer au poste</button></div>` : "";
     const sugg = (tagBank[g]||[]).map(t=>`<option value="${t}">`).join("");
     return `
       <div class="tagdetail">
-        ${rows || `<p class="muted" style="margin:.2rem 0">Aucune étiquette. Ajoute-en une pour ventiler ce poste.</p>`}
-        ${sumLine}
+        ${rows || `<p class="muted" style="margin:.2rem 0">Aucune dépense saisie. Ajoute une étiquette pour reporter le réel.</p>`}
         <div class="tagadd">
           <input class="tagadd__name" list="bank-${g}" data-addname="${id}" placeholder="étiquette (ex. Carrefour)">
           <datalist id="bank-${g}">${sugg}</datalist>
@@ -319,9 +362,6 @@
       const del = e.target.closest("[data-tagdel]");
       if (del){ const [id,label]=del.dataset.tagdel.split("|"); if(tags[anneeCourante]?.[moisCourant]?.[id]){ delete tags[anneeCourante][moisCourant][id][label]; save(K.tags,tags); renderMonth(); } return; }
 
-      const ap = e.target.closest("[data-apply]");
-      if (ap){ const id=ap.dataset.apply; const s=tagsSum(anneeCourante,moisCourant,id); if(s!==null){ setOverlay(anneeCourante,id,moisCourant,s); renderMonth(); } return; }
-
       const add = e.target.closest("[data-addbtn]");
       if (add){
         const id=add.dataset.addbtn;
@@ -337,13 +377,6 @@
     });
 
     panel.addEventListener("change", e => {
-      const am = e.target.closest("[data-amount]");
-      if (am){
-        const id=am.dataset.amount, raw=am.value.trim();
-        if(raw==="") clearOverlay(anneeCourante,id,moisCourant);
-        else setOverlay(anneeCourante,id,moisCourant,parseFloat(raw.replace(",","."))||0);
-        renderMonth(); return;
-      }
       const ta = e.target.closest("[data-tagamt]");
       if (ta){
         const [id,label]=ta.dataset.tagamt.split("|"); const raw=ta.value.trim();
@@ -353,7 +386,6 @@
       }
     });
 
-    // case « tous les postes » dans la légende du mois
     panel.addEventListener("input", e => {
       if (e.target.id==="mShowAll"){ showAllPostes=e.target.checked; renderMonth(); }
     });
@@ -406,13 +438,13 @@
     if (!lines.length) return [];
     // Trouver la ligne d'en-tête : celle contenant un mot-clé de libellé + un de valeur/quantité
     const KW = {
-      label:["libelle","valeur","instrument","nom","support","fonds","actif","designation","titre"],
+      label:["libelle","valeur","instrument","nom","support","fonds","actif","designation","titre","name"],
       isin:["isin","code"],
-      qty:["quantite","qte","nombre","parts","nb","qty"],
-      pru:["pru","revient","achat","pmp","moyen"],
-      last:["cours","dernier","liquidative","vl","prix"],
-      value:["valorisation","montant","marche","evaluation","total","evalue"],
-      pv:["+/-","plus","pv","gain","latente","value"],
+      qty:["quantite","qte","nombre","parts","nb","qty","quantity"],
+      pru:["pru","revient","achat","pmp","moyen","buying"],
+      last:["cours","dernier","liquidative","vl","prix","last"],
+      value:["valorisation","montant","marche","evaluation","total","evalue","amount"],
+      pv:["+/-","plus-value","plus value","plusvalue","plus","pv","latente","gain","amountvariation"],
     };
     let hi=0, header=null;
     for (let i=0;i<Math.min(lines.length,8);i++){

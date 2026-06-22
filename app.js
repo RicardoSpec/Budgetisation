@@ -228,22 +228,31 @@
   const EXPANDED = new Set();
   let monthBound = false;
 
-  // Réel d'un poste = somme des étiquettes ; sinon valeur importée (réalisé historique).
-  function reelVal(y,id,m){ const s=tagsSum(y,m,id); if(s!==null) return s; const b=base(y,id,m); return b===null?0:b; }
+  // Clôture selon la date réelle : mois passé = clôturé ; mois courant et futurs = non.
+  function moisCloture(y,m){ const n=new Date(),cy=n.getFullYear(),cm=n.getMonth(); if(y<cy) return true; if(y>cy) return false; return m<cm; }
+  function estMoisCourant(y,m){ const n=new Date(); return y===n.getFullYear() && m===n.getMonth(); }
+
+  // Réel d'un poste : étiquettes saisies en priorité ; sinon import si le mois est clôturé ; sinon 0.
+  function reelVal(y,id,m){
+    const s=tagsSum(y,m,id); if(s!==null) return s;
+    if(moisCloture(y,m)){ const b=base(y,id,m); return b===null?0:b; }
+    return 0;
+  }
   function reelGroupeMois(y,g,m){ return postesGroupe(g).reduce((s,id)=>s+reelVal(y,id,m),0); }
 
-  // Solde du compte : réalisé (historique importé) pour passé/en cours, prévisionnel ensuite.
-  function moisCourantReel(y){ const n=new Date(),cy=n.getFullYear(); if(y<cy) return 11; if(y>cy) return -1; return n.getMonth(); }
-  function netMois(y,m){ return totalGroupeMois(y,"revenu",m)-totalGroupeMois(y,"besoin",m)-totalGroupeMois(y,"desir",m)-totalGroupeMois(y,"epargne",m)-totalGroupeMois(y,"invest",m); }
-  function soldeBanque(y){
-    const dep=YEARS[y].soldeDepart||0, sr=YEARS[y].soldeReel||[], cmi=moisCourantReel(y);
-    const bal=[]; let anchor=dep;
-    for(let m=0;m<12;m++){
-      const realized = (sr[m]!==null&&sr[m]!==undefined) && (cmi===11 || m<=cmi);
-      if(realized){ bal[m]=sr[m]; anchor=sr[m]; }
-      else { anchor += netMois(y,m); bal[m]=anchor; }
+  // Flux nets mensuels : revenus − (besoins + désirs + épargne + investissement).
+  function netReelMois(y,m){ return reelGroupeMois(y,"revenu",m)-reelGroupeMois(y,"besoin",m)-reelGroupeMois(y,"desir",m)-reelGroupeMois(y,"epargne",m)-reelGroupeMois(y,"invest",m); }
+  function netPrevuMois(y,m){ return totalGroupeMois(y,"revenu",m)-totalGroupeMois(y,"besoin",m)-totalGroupeMois(y,"desir",m)-totalGroupeMois(y,"epargne",m)-totalGroupeMois(y,"invest",m); }
+
+  // Trésorerie cumulée depuis le solde de départ.
+  // Réel (= compte Boursobank) pour les mois clôturés et le mois en cours ; prévisionnel au-delà.
+  function soldeTresorerie(y,m){
+    const dep=YEARS[y].soldeDepart||0; let run=dep, futur=false;
+    for(let k=0;k<=m;k++){
+      if(moisCloture(y,k)||estMoisCourant(y,k)) run+=netReelMois(y,k);
+      else { run+=netPrevuMois(y,k); futur=true; }
     }
-    return { bal, cmi };
+    return { value: run, futur };
   }
 
   function renderMonth(){
@@ -252,6 +261,16 @@
     const y = anneeCourante, m = moisCourant;
 
     const chips = MOIS.map((mn,i)=>`<button class="mchip ${i===m?'is-active':''}" data-month="${i}">${mn.slice(0,3)}</button>`).join("");
+
+    // Barre figée : trésorerie cumulée = pont avec le compte Boursobank.
+    const tr = soldeTresorerie(y,m);
+    const tresoBar = `
+      <div class="treso-sticky">
+        <span class="treso-sticky__label">Trésorerie · fin ${MOIS[m]}</span>
+        <strong class="treso-sticky__val num ${signe(tr.value)}">${fmt(tr.value)}</strong>
+        <span class="treso-sticky__hint">${tr.futur?"prévisionnel":"réel · solde Boursobank"}</span>
+      </div>`;
+
     const caption = `
       <div class="month-caption">
         <span class="month-caption__name">${MOIS[m]} ${y}</span>
@@ -260,25 +279,17 @@
 
     const blocks = ORDRE.map(g=>blockHtml(y,m,g)).join("");
 
-    // Synthèse + solde du compte sous le mois
-    const { bal, cmi } = soldeBanque(y);
-    const solde = bal[m];
-    const realizedM = (cmi===11) || (m<=cmi);
+    // Reste à payer / à recevoir du mois (prévu − réel).
     let resteP=0, resteR=0;
     ["besoin","desir","epargne","invest"].forEach(g=>postesGroupe(g).forEach(id=>{ const e=val(y,id,m)-reelVal(y,id,m); if(e>0) resteP+=e; }));
     postesGroupe("revenu").forEach(id=>{ const e=val(y,id,m)-reelVal(y,id,m); if(e>0) resteR+=e; });
     const summary = `
       <section class="month-summary">
-        <div class="ms-card ms-card--solde">
-          <span class="ms-card__label">Solde du compte · fin ${MOIS[m]}</span>
-          <strong class="num ${signe(solde)}">${fmt(solde)}</strong>
-          <em class="ms-card__tag">${realizedM?"réalisé":"prévisionnel"}</em>
-        </div>
         <div class="ms-card"><span class="ms-card__label">Reste à payer</span><strong class="num">${fmt(resteP)}</strong></div>
         <div class="ms-card"><span class="ms-card__label">Reste à recevoir</span><strong class="num">${fmt(resteR)}</strong></div>
       </section>`;
 
-    host.innerHTML = `<div class="mchips" role="tablist">${chips}</div>${caption}<div class="blocks">${blocks}</div>${summary}`;
+    host.innerHTML = `<div class="mchips" role="tablist">${chips}</div>${tresoBar}${caption}<div class="blocks">${blocks}</div>${summary}`;
     if (!monthBound) { monthBound = true; bindMonth(); }
   }
 

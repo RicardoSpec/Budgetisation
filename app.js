@@ -228,14 +228,13 @@
   const EXPANDED = new Set();
   let monthBound = false;
 
-  // Clôture selon la date réelle : mois passé = clôturé ; mois courant et futurs = non.
-  function moisCloture(y,m){ const n=new Date(),cy=n.getFullYear(),cm=n.getMonth(); if(y<cy) return true; if(y>cy) return false; return m<cm; }
-  function estMoisCourant(y,m){ const n=new Date(); return y===n.getFullYear() && m===n.getMonth(); }
+  // Réalisé = mois passés ET mois en cours (l'import fait foi) ; seuls les mois futurs restent à 0.
+  function moisRealise(y,m){ const n=new Date(),cy=n.getFullYear(),cm=n.getMonth(); if(y<cy) return true; if(y>cy) return false; return m<=cm; }
 
-  // Réel d'un poste : étiquettes saisies en priorité ; sinon import si le mois est clôturé ; sinon 0.
+  // Réel d'un poste : étiquettes saisies en priorité ; sinon import si le mois est réalisé ; sinon 0.
   function reelVal(y,id,m){
     const s=tagsSum(y,m,id); if(s!==null) return s;
-    if(moisCloture(y,m)){ const b=base(y,id,m); return b===null?0:b; }
+    if(moisRealise(y,m)){ const b=base(y,id,m); return b===null?0:b; }
     return 0;
   }
   function reelGroupeMois(y,g,m){ return postesGroupe(g).reduce((s,id)=>s+reelVal(y,id,m),0); }
@@ -245,11 +244,11 @@
   function netPrevuMois(y,m){ return totalGroupeMois(y,"revenu",m)-totalGroupeMois(y,"besoin",m)-totalGroupeMois(y,"desir",m)-totalGroupeMois(y,"epargne",m)-totalGroupeMois(y,"invest",m); }
 
   // Trésorerie cumulée depuis le solde de départ.
-  // Réel (= compte Boursobank) pour les mois clôturés et le mois en cours ; prévisionnel au-delà.
+  // Réel (= compte Boursobank) pour les mois réalisés ; prévisionnel pour les mois futurs.
   function soldeTresorerie(y,m){
     const dep=YEARS[y].soldeDepart||0; let run=dep, futur=false;
     for(let k=0;k<=m;k++){
-      if(moisCloture(y,k)||estMoisCourant(y,k)) run+=netReelMois(y,k);
+      if(moisRealise(y,k)) run+=netReelMois(y,k);
       else { run+=netPrevuMois(y,k); futur=true; }
     }
     return { value: run, futur };

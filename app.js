@@ -46,7 +46,7 @@
   const ORDRE = ["revenu","besoin","desir","epargne","invest"];
 
   /* ---------- Stockage local ---------- */
-  const K = { years:"gl_years_v1", overlays:"gl_overlays_v1", tags:"gl_tags_v1", bank:"gl_tagbank_v1", pf:"gl_portfolio_v1" };
+  const K = { years:"gl_years_v1", overlays:"gl_overlays_v1", tags:"gl_tags_v1", bank:"gl_tagbank_v1", pf:"gl_portfolio_v1", imports:"gl_imports_v1" };
   const load = (k, def) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? def; } catch { return def; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn("Stockage indisponible", e); } };
 
@@ -55,6 +55,7 @@
   let tags     = load(K.tags, {});
   let tagBank  = load(K.bank, {});
   let PF       = load(K.pf, { accounts: [] });
+  let IMPORTS  = load(K.imports, {});    // dédup imports externes : "coachmuscu:<id>" -> { y, m, poste, label, amount }
   if (!PF.accounts) PF = { accounts: [] };
 
   // Banque d'étiquettes par catégorie (enrichie à la volée)
@@ -720,6 +721,60 @@
   /* ====================================================================
      Onglet Données : import par année + sauvegarde globale
      ==================================================================== */
+  /* ====================================================================
+     Import Coach Muscu — lecture seule (même origine), idempotent
+     Store source : localStorage "suiviMuscu_v1" (jamais réécrit).
+     Chaque article "acheté" avec un prix -> une étiquette Besoins/courses.
+     ==================================================================== */
+  const COACH_KEY = "suiviMuscu_v1";     // NE JAMAIS écrire dans cette clé
+
+  function coachReadLocal(){
+    try { const raw = localStorage.getItem(COACH_KEY); return raw ? JSON.parse(raw) : null; }
+    catch { return null; }
+  }
+  // Accepte soit le store brut {courses:[…]}, soit l'export global {app:"coachmuscu", suiviMuscu_v1:{…}}.
+  function coachExtractStore(obj){
+    if(!obj || typeof obj!=="object") return null;
+    if(Array.isArray(obj.courses)) return obj;
+    if(obj.app==="coachmuscu" && obj.suiviMuscu_v1 && Array.isArray(obj.suiviMuscu_v1.courses)) return obj.suiviMuscu_v1;
+    return null;
+  }
+  function coachImport(raw){
+    const s = coachExtractStore(raw);
+    if(!s) return { ok:false };
+    let importés=0, ignorés=0, sansPrix=0, horsAnnee=0;
+    const annees=new Set();
+    (s.courses||[]).forEach(a=>{
+      if(!a || typeof a!=="object" || a.bought!==true) return;         // seulement les articles achetés
+      const prix = parseFloat(String(a.prix ?? "").replace(",","."));
+      if(!isFinite(prix)){ sansPrix++; return; }                        // prix inexploitable
+      const srcKey = "coachmuscu:"+a.id;
+      if(IMPORTS[srcKey]){ ignorés++; return; }                         // déjà importé -> idempotent
+      const d = (typeof a.ts==="number" && isFinite(a.ts)) ? new Date(a.ts) : new Date();
+      const y=d.getFullYear(), m=d.getMonth(), poste="courses";         // catégorie = Besoins
+      const baseLabel = String(a.name ?? "").trim() || "Article";
+      ensureBag(y,m,poste);
+      let label=baseLabel, n=2;
+      while(tags[y][m][poste][label]!==undefined){ label = baseLabel+" ("+(n++)+")"; }  // libellé unique dans le mois
+      tags[y][m][poste][label] = prix;
+      IMPORTS[srcKey] = { y, m, poste, label, amount:prix };
+      tagBank.besoin = tagBank.besoin || [];
+      if(!tagBank.besoin.includes(baseLabel)){ tagBank.besoin.push(baseLabel); tagBank.besoin.sort((x,z)=>x.localeCompare(z,'fr')); }
+      importés++; annees.add(y); if(!YEARS[y]) horsAnnee++;
+    });
+    save(K.tags,tags); save(K.imports,IMPORTS); save(K.bank,tagBank);
+    return { ok:true, importés, ignorés, sansPrix, horsAnnee, annees:[...annees].sort() };
+  }
+  function coachReport(res, msg){
+    if(!res || !res.ok){ msg.className="msg err"; msg.textContent="Aucune donnée Coach Muscu exploitable (liste « courses » introuvable)."; return; }
+    const extra=[];
+    if(res.sansPrix) extra.push(`${res.sansPrix} sans prix`);
+    if(res.horsAnnee) extra.push(`${res.horsAnnee} sur une année non chargée`);
+    msg.className="msg ok";
+    msg.textContent = `${res.importés} importé(s), ${res.ignorés} déjà présent(s)${extra.length?` — ${extra.join(", ")}`:""}.`;
+    renderAll();
+  }
+
   function renderData() {
     const ys = Object.keys(YEARS).map(Number).sort((a,b)=>a-b);
     const annéesOptions = [];
@@ -758,6 +813,21 @@
           <div class="field" style="margin-top:1rem">
             <button class="btn btn--ghost" id="doWipe">Effacer mes modifications</button>
           </div>
+        </div>
+        <div class="data-card">
+          <h3>Importer les courses de Coach Muscu</h3>
+          <p>Ajoute les articles cochés « acheté » dans Coach Muscu (même navigateur) en dépenses <strong>Besoins</strong>, sans doublon. Lecture seule&nbsp;: Coach Muscu n'est pas modifié.</p>
+          <div class="field">
+            <button class="btn" id="doCoachLocal">Importer depuis Coach Muscu</button>
+          </div>
+          <details class="coach-file">
+            <summary>ou importer un fichier d'export Coach Muscu</summary>
+            <div class="field" style="margin-top:.6rem">
+              <input type="file" id="coachFile" accept="application/json,.json">
+              <button class="btn btn--ghost" id="doCoachFile">Importer le fichier</button>
+            </div>
+          </details>
+          <p id="coachMsg" class="msg"></p>
         </div>
       </div>`;
 
@@ -799,7 +869,7 @@
 
     // Sauvegarde globale
     el("#doExport").onclick = () => {
-      const blob = new Blob([JSON.stringify({ years:YEARS, overlays, tags, tagBank, portfolio:PF }, null, 2)], { type:"application/json" });
+      const blob = new Blob([JSON.stringify({ years:YEARS, overlays, tags, tagBank, portfolio:PF, imports:IMPORTS }, null, 2)], { type:"application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = `grand-livre-sauvegarde-${new Date().toISOString().slice(0,10)}.json`;
@@ -818,6 +888,7 @@
           if (d.tags) { tags=d.tags; save(K.tags,tags); }
           if (d.tagBank) { tagBank=d.tagBank; save(K.bank,tagBank); }
           if (d.portfolio) { PF=d.portfolio; if(!PF.accounts) PF={accounts:[]}; save(K.pf,PF); }
+          if (d.imports) { IMPORTS=d.imports; save(K.imports,IMPORTS); }
           refreshAnnees(); msg.className="msg ok"; msg.textContent="Sauvegarde restaurée.";
           initYearSelect(); renderAll();
         } catch { msg.className="msg err"; msg.textContent="Fichier de sauvegarde illisible."; }
@@ -826,9 +897,25 @@
     };
     el("#doWipe").onclick = () => {
       if (!confirm("Effacer tes modifications et tags ? Les années importées restent intactes.")) return;
-      overlays={}; tags={}; save(K.overlays,overlays); save(K.tags,tags);
+      overlays={}; tags={}; IMPORTS={}; save(K.overlays,overlays); save(K.tags,tags); save(K.imports,IMPORTS);
       el("#backupMsg").className="msg ok"; el("#backupMsg").textContent="Modifications effacées.";
       renderAll();
+    };
+
+    // Import Coach Muscu — lecture directe du localStorage même origine
+    el("#doCoachLocal").onclick = () => {
+      const msg = el("#coachMsg");
+      const store = coachReadLocal();
+      if(!store){ msg.className="msg err"; msg.textContent="Coach Muscu introuvable dans ce navigateur. Ouvre-le une fois ici, ou utilise l'import par fichier ci-dessous."; return; }
+      coachReport(coachImport(store), msg);
+    };
+    // Import Coach Muscu — par fichier d'export
+    el("#doCoachFile").onclick = () => {
+      const f = el("#coachFile").files[0], msg = el("#coachMsg");
+      if(!f){ msg.className="msg err"; msg.textContent="Choisis d'abord un fichier d'export Coach Muscu."; return; }
+      const r = new FileReader();
+      r.onload = () => { try { coachReport(coachImport(JSON.parse(r.result)), msg); } catch { msg.className="msg err"; msg.textContent="Fichier illisible."; } };
+      r.readAsText(f);
     };
   }
 

@@ -1,73 +1,175 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Grand livre — Budget</title>
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#12466B">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Coach Muscu">
+  <title>Coach Muscu</title>
+  <link rel="icon" href="favicon.ico">
+  <link rel="shortcut icon" href="favicon.ico">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <!-- Styles externes -->
+  <link rel="stylesheet" href="style.css?v=49">
 </head>
 <body>
 
-<!-- ============ Barre supérieure : menu hamburger + apps ============ -->
-<nav class="appbar" aria-label="Navigation des applications">
-  <button class="burger" id="burger" aria-label="Ouvrir le menu" aria-expanded="false" aria-controls="appmenu">
-    <span></span><span></span><span></span>
-  </button>
-  <span class="appbar__here">Budget</span>
-  <ul class="appmenu" id="appmenu" hidden>
-    <li class="appmenu__title">Mes applications</li>
-    <li><a href="https://ricardospec.github.io/coachmuscu/">Coachmuscu</a></li>
-    <li><a href="https://ricardospec.github.io/Mouche-Universit-/">Mouche Université</a></li>
-    <li><a href="https://ricardospec.github.io/Lateliergram/">L'atelier gram</a></li>
-    <li><a href="https://ricardospec.github.io/English-Fly/">English Fly</a></li>
-    <li><span class="appmenu__soon">Espagnol — à venir</span></li>
-    <li class="appmenu__sep"></li>
-    <li><a href="index.html" aria-current="page" class="is-current">Budget</a></li>
-  </ul>
-</nav>
+  <!-- Avertissement stockage (affiché par app.js si localStorage indisponible) -->
+  <div class="warn" id="warnbar" hidden>Le stockage local n'est pas disponible sur ce navigateur : tes saisies ne seront pas conservées après fermeture. Pense à exporter tes données.</div>
 
-<!-- ============ En-tête de l'app ============ -->
-<header class="masthead">
-  <div class="masthead__title">
-    <h1>Grand livre</h1>
-    <p class="masthead__sub">Budget personnel · Besoins · Désirs · Épargne · Investissement</p>
-  </div>
-  <div class="masthead__year">
-    <label for="yearSelect" class="visually-hidden">Choisir l'année</label>
-    <select id="yearSelect" class="yearSelect"></select>
-  </div>
-</header>
+  <header class="top">
+    <div class="top-left">
+      <button class="menu-btn" id="menuBtn" aria-label="Ouvrir le menu des apps" aria-expanded="false"><span></span><span></span><span></span></button>
+      <h1>Suivi muscu</h1>
+    </div>
+    <span class="chip" id="wkChip"></span>
+  </header>
 
-<!-- ============ Onglets internes ============ -->
-<nav class="tabs" aria-label="Sections">
-  <button class="tab is-active" data-tab="dashboard">Tableau de bord</button>
-  <button class="tab" data-tab="month">Mois</button>
-  <button class="tab" data-tab="portfolio">Portefeuille</button>
-  <button class="tab" data-tab="charts">Graphiques</button>
-  <button class="tab" data-tab="data">Données</button>
-</nav>
+  <!-- Panneau lanceur d'apps (ouvert par le bouton ☰) -->
+  <div class="drawer-bg" id="drawerBg" hidden></div>
+  <aside class="drawer" id="drawer" hidden aria-label="Mes applications">
+    <div class="drawer-head">
+      <span class="drawer-title">Mes apps</span>
+      <button class="drawer-close" id="drawerClose" aria-label="Fermer le menu">&times;</button>
+    </div>
+    <nav class="app-list" id="appList"></nav>
+    <div class="drawer-foot">
+      <button class="drawer-gear" id="settingsBtn"><span class="gear-ic">⚙️</span><span>Réglages</span></button>
+    </div>
+  </aside>
 
-<!-- ============ Contenu (rempli par app.js) ============ -->
-<main class="page">
-  <section class="panel is-active" id="panel-dashboard" aria-label="Tableau de bord"><div data-fill="dashboard"></div></section>
-  <section class="panel" id="panel-month" aria-label="Détail du mois"><div data-fill="month"></div></section>
-  <section class="panel" id="panel-portfolio" aria-label="Portefeuille"><div data-fill="portfolio"></div></section>
-  <section class="panel" id="panel-charts" aria-label="Graphiques"><div data-fill="charts"></div></section>
-  <section class="panel" id="panel-data" aria-label="Données"><div data-fill="data"></div></section>
-</main>
+  <main>
+    <div id="stickyProt"></div>
 
-<footer class="footnote">
-  <p>Tes données restent dans ce navigateur. Rien n'est envoyé en ligne. Pense à exporter une sauvegarde globale régulièrement depuis l'onglet « Données ».</p>
-</footer>
+    <!-- ====================== AUJOURD'HUI ====================== -->
+    <section class="view active" id="v-today">
+      <button class="hcol" id="homeCalToggle"><span class="hcol-ic">📅</span><span class="hcol-txt"><span class="hcol-k">Calendrier</span><span class="hcol-v" id="homeCalSummary"></span></span><span class="hcol-chev">▾</span></button>
+      <div id="homeCal" class="calwrap collapsed"></div>
+      <div class="hero" id="heroCard"></div>
+      <div id="todayNutri"></div>
+      <div id="todayCourses"></div>
+      <h2 class="page">Journal du jour</h2>
+      <div id="todayLog"></div>
+      <div id="backupNudge"></div>
+    </section>
 
-<!-- Chart.js (utilisé par l'onglet Graphiques) -->
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<!-- Logique de l'app (aucune donnée n'est embarquée dans le dépôt) -->
-<script defer src="app.js"></script>
+    <!-- ====================== SPORT (muscu + triathlon) ====================== -->
+    <section class="view" id="v-sport">
+      <div class="subtabs" id="sportSub"></div>
 
+      <div class="sport-pane" id="sportMuscu">
+        <p class="hint">Enchaîne A → B → C → D, semaine après semaine. Bloc 1 : du 27 juin au 31 juillet (objectif 27 juillet) · Bloc 2 : en août. Touche une case pour ouvrir la séance (charges de la dernière fois pré-affichées, minuteur de repos intégré).</p>
+        <div id="progBlocks"></div>
+        <div class="spacer"></div>
+        <div id="sessionDetail"></div>
+      </div>
+
+      <div class="sport-pane" id="sportTri" hidden>
+        <p class="hint">Plan Distance Olympique — 10 semaines, 3 séances/sem. 🏁 Course les 11-13 septembre (semaine 10). Touche une case pour voir la séance et la cocher. Détails complets dans ton Drive. (* = affûtage)</p>
+        <div id="triProgress"></div>
+        <div class="card pad blockcard open" id="triPlanCard">
+          <button type="button" class="blk-toggle" id="triPlanToggle"><span class="blk-ttl">Plan 10 semaines</span><span class="blk-meta" id="triPlanMeta">0/30</span><span class="blk-chev">▾</span></button>
+          <div class="blk-body" id="triPlanBody">
+            <div class="legend"><span><i class="dot-done"></i>Faite</span><span><i class="dot-todo"></i>À faire</span></div>
+            <table class="grid" id="triTable"></table>
+          </div>
+        </div>
+        <div class="spacer"></div>
+        <div id="triDetail"></div>
+      </div>
+    </section>
+
+    <!-- ====================== JOURNAL ====================== -->
+    <section class="view" id="v-journal">
+      <h2 class="page">Journal</h2>
+      <div class="datenav">
+        <button class="navbtn" id="dayPrev" aria-label="Jour précédent">‹</button>
+        <div class="dlabel" id="dayLabel"></div>
+        <button class="navbtn" id="dayNext" aria-label="Jour suivant">›</button>
+      </div>
+      <div id="journalLog"></div>
+    </section>
+
+    <!-- ====================== PROGRÈS ====================== -->
+    <section class="view" id="v-prog2">
+      <h2 class="page">Progrès</h2>
+
+      <div class="card pad">
+        <div class="stat-grid" id="statGrid"></div>
+      </div>
+
+      <div id="weekViz"></div>
+
+      <div class="card pad">
+        <div class="sec-title">Poids</div>
+        <div id="weightChart"></div>
+      </div>
+
+      <div class="card pad">
+        <div class="sec-title">Protéines</div>
+        <div id="proteinChart"></div>
+      </div>
+
+      <!-- Graphique de régularité : types de séance (lignes) × 14 derniers jours (colonnes) -->
+      <div class="card pad">
+        <div class="sec-title">Régularité — 14 derniers jours</div>
+        <p class="muted" style="margin:0 0 10px">D'après les sports cochés chaque jour dans le Journal.</p>
+        <div id="activityGraph"></div>
+      </div>
+
+      <!-- Bilan hebdo à copier-coller dans le chat -->
+      <div class="card pad">
+        <div class="sec-title">Bilan de la semaine</div>
+        <p class="muted" style="margin:0 0 8px">Copie ce texte et colle-le ici dans le chat (avec une photo si tu veux une analyse de progression).</p>
+        <textarea id="bilanText" class="bilan" readonly rows="11"></textarea>
+        <button class="btn ghost" id="bilanCopy" style="margin-top:8px">Copier le bilan</button>
+      </div>
+
+      <!-- Données / sauvegarde -->
+      <div class="card pad">
+        <div class="sec-title">Tes données</div>
+        <p class="muted" style="margin:0 0 10px">Sauvegarde locale (sur cet appareil uniquement). Exporte régulièrement pour garder une copie sur ton Drive.</p>
+        <button class="btn ghost" id="btnExport">Exporter (JSON)</button>
+        <label class="btn ghost" for="fileImport" style="margin-top:8px;display:block;text-align:center;cursor:pointer">Importer (JSON)</label>
+        <input type="file" id="fileImport" accept="application/json,.json" hidden>
+        <button class="btn danger" id="btnReset" style="margin-top:8px">Tout effacer</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Feuille d'action : état d'un jour (ouverte en touchant une case du calendrier) -->
+  <div class="sheet-bg" id="calSheetBg" hidden></div>
+  <div class="sheet" id="calSheet" hidden role="dialog" aria-label="Modifier le jour"></div>
+
+  <!-- Panneau Réglages (plein écran, ouvert par l'engrenage du menu) -->
+  <section class="settings" id="settings" hidden aria-label="Réglages">
+    <header class="settings-head">
+      <button class="settings-close" id="settingsClose" aria-label="Fermer les réglages">‹</button>
+      <span class="settings-title">Réglages</span>
+    </header>
+    <div class="settings-body" id="settingsBody"></div>
+  </section>
+
+  <!-- ====================== NAVIGATION ====================== -->
+  <nav class="tabs">
+    <button class="tab on" data-view="v-today">
+      <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Aujourd'hui</button>
+    <button class="tab" data-view="v-sport">
+      <svg viewBox="0 0 24 24"><path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/></svg>Sport</button>
+    <button class="tab" data-view="v-journal">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>Journal</button>
+    <button class="tab" data-view="v-prog2">
+      <svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M8 16l3-4 3 2 4-6"/></svg>Progrès</button>
+  </nav>
+
+  <!-- ====================== SCRIPTS ======================
+       Ordre important : data.js (variables PROGRAM, PROGRAM2, TRI, BRISTOL…)
+       doit être chargé AVANT app.js (logique, rendu, stockage). -->
+  <script src="data.js?v=49"></script>
+  <script src="app.js?v=49"></script>
 </body>
 </html>

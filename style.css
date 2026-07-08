@@ -7,36 +7,38 @@
 
 /* ----------------------- Tokens ----------------------- */
 :root {
-  /* Surfaces & encre */
-  --paper:      #eef1ef;   /* fond général, gris froid (pas crème) */
-  --card:       #fbfcfb;   /* surfaces surélevées */
-  --ink:        #16302b;   /* texte principal, pin très sombre */
-  --ink-soft:   #4c5b56;   /* texte secondaire */
-  --ink-faint:  #8a968f;   /* légendes, libellés discrets */
-  --rule:       #d6dcd8;   /* filets de tableau */
-  --rule-strong:#b9c2bd;
+  /* Surfaces & encre — palette Coach Muscu (apps sœurs) */
+  --paper:      #eef2f6;   /* fond général gris froid */
+  --card:       #ffffff;   /* cartes */
+  --ink:        #16242e;   /* texte principal */
+  --ink-soft:   #62717d;   /* texte secondaire */
+  --ink-faint:  #94a2ad;   /* légendes discrètes */
+  --rule:       #e4e9ef;   /* filets */
+  --rule-strong:#cfd7df;
 
-  /* Les trois groupes — la signature du livre */
+  /* Les groupes budget — encodage des données (conservés) */
   --besoin:     #3e5c76;   /* ardoise */
   --desir:      #b07a2b;   /* ocre */
   --epargne:    #2e6e5e;   /* pin */
-  --invest:     #6b4e9e;   /* prune — investissement */
-  --revenu:     #355e3b;   /* vert sombre pour les entrées */
+  --invest:     #6b4e9e;   /* prune */
+  --revenu:     #355e3b;   /* vert entrées */
 
   /* Signe */
-  --pos:        #2e6e5e;
-  --neg:        #b23a28;
+  --pos:        #1d7a46;
+  --neg:        #c0392b;
 
-  /* Accent d'interface (sobre) */
-  --accent:     #16302b;
-  --accent-ink: #fbfcfb;
+  /* Chrome : bleu primaire + orange accent (Coach Muscu) */
+  --accent:     #12466B;
+  --accent-d:   #0d3552;
+  --accent-ink: #ffffff;
+  --accent2:    #F4622B;
 
-  --radius:     4px;
-  --shadow:     0 1px 2px rgba(22,48,43,.06), 0 4px 14px rgba(22,48,43,.05);
+  --radius:     12px;
+  --shadow:     0 1px 3px rgba(20,40,60,.06), 0 1px 1px rgba(20,40,60,.04);
 
-  --display: "Fraunces", Georgia, serif;
-  --body:    "Public Sans", system-ui, -apple-system, sans-serif;
-  --mono:    "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+  --display: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --body:    -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:    ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 
 /* ----------------------- Base ----------------------- */
@@ -53,7 +55,7 @@ body {
   font-size: 15px;
 }
 
-h1, h2, h3 { font-family: var(--display); font-weight: 500; letter-spacing: -.01em; margin: 0; }
+h1, h2, h3 { font-family: var(--display); font-weight: 800; letter-spacing: -.02em; margin: 0; }
 
 a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 
@@ -690,3 +692,60 @@ td.cell.is-edited { background: #fff6e6; box-shadow: inset 0 0 0 1px var(--desir
   .tabs::-webkit-scrollbar { display: none; }
   .tab { white-space: nowrap; flex: 0 0 auto; }
 }
+
+/* ============================================================
+   SKIN COACH MUSCU (apps sœurs) — chrome : en-tête, onglets, boutons
+   Placé en fin de fichier : ces règles priment sur les précédentes.
+   ============================================================ */
+
+/* --- En-tête bleu --- */
+.appbar {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--accent); color: #fff; box-shadow: none; border-bottom: none;
+  padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+}
+.appbar__here { color: #fff; font-weight: 800; font-size: 18px; letter-spacing: -.01em; }
+.burger span { background: #fff; }
+
+/* Sélecteur d'année en "chip" dans l'en-tête (déplacé depuis le masthead) */
+.appbar .yearSelect {
+  margin-left: auto; -webkit-appearance: none; appearance: none;
+  background-color: rgba(255,255,255,.16); color: #fff; border: none;
+  border-radius: 999px; padding: 6px 28px 6px 13px; font-weight: 700; font-size: 13px; font-family: var(--mono);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='white' stroke-width='2' viewBox='0 0 16 16'><path d='M4 6l4 4 4-4'/></svg>");
+  background-repeat: no-repeat; background-position: right 10px center;
+}
+.appbar .yearSelect option { color: #16242e; }
+
+/* Menu d'apps : carte blanche façon Coach */
+.appmenu { background: #fff; border: 1px solid var(--rule); border-radius: 14px; box-shadow: 0 10px 30px rgba(8,20,33,.18); }
+
+/* Ancien bandeau titre masqué (redondant avec l'en-tête) */
+.masthead { display: none; }
+
+/* --- Onglets : barre iconique fixée en bas, frostée --- */
+.tabs {
+  position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: rgba(255,255,255,.96);
+  -webkit-backdrop-filter: saturate(180%) blur(10px); backdrop-filter: saturate(180%) blur(10px);
+  border-top: 1px solid var(--rule); border-bottom: none; box-shadow: none;
+  display: flex; padding: 0 0 env(safe-area-inset-bottom);
+}
+.tab {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 9px 0 7px; border: none; border-radius: 0; background: transparent; color: var(--ink-faint);
+  font-size: 9.5px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap;
+}
+.tab svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tab.is-active { color: var(--accent); background: transparent; border-bottom: none; box-shadow: none; }
+
+/* Place pour la barre du bas */
+body { padding-bottom: calc(env(safe-area-inset-bottom) + 76px); }
+
+/* --- Boutons : arrondi + CTA orange façon Coach --- */
+.btn { border-radius: var(--radius); font-weight: 700; }
+.btn--accent, .deck-ok { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+.btn--accent:disabled { background: var(--accent2); opacity: .45; }
+
+/* Cartes un peu plus arrondies */
+.data-card, .kpi, .grp, .ms-card { border-radius: 14px; }

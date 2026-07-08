@@ -138,7 +138,7 @@
         <button class="btn" id="newYear">+ Créer une année</button>
         <label class="check"><input type="checkbox" id="showAll" ${showAllPostes?"checked":""}> Afficher tous les postes</label>
         <button class="btn btn--ghost" id="resetYear">Réinitialiser mes modifs ${y}</button>
-        <span class="hint">Clique une cellule pour modifier le budget. Vide = retour à la valeur d'origine.</span>
+        <span class="hint">Ouvre un poste pour éditer ses 12 mois. Cellule vide = valeur d'origine.</span>
       </div>`;
 
     host.innerHTML = kpis + toolbar + ledgerAnnuel(y) + patrimoineBlock();
@@ -153,6 +153,12 @@
 
     if (!dashBound) {
       dashBound = true;
+      el("#panel-dashboard").addEventListener("click", e => {
+        const gt = e.target.closest("[data-gtoggle]");
+        if (gt){ const g=gt.dataset.gtoggle; DASH_GOPEN.has(g)?DASH_GOPEN.delete(g):DASH_GOPEN.add(g); renderDashboard(); return; }
+        const pt = e.target.closest("[data-ptoggle]");
+        if (pt){ const id=pt.dataset.ptoggle; DASH_POPEN.has(id)?DASH_POPEN.delete(id):DASH_POPEN.add(id); renderDashboard(); return; }
+      });
       el("#panel-dashboard").addEventListener("change", e => {
         const inp = e.target.closest("input[data-cell]");
         if (!inp) return;
@@ -168,27 +174,53 @@
   function setOverlay(y,id,m,n){ overlays[y]=overlays[y]||{}; overlays[y][id]=overlays[y][id]||{}; overlays[y][id][m]=n; save(K.overlays,overlays); }
   function clearOverlay(y,id,m){ if(hasOverlay(y,id,m)){ delete overlays[y][id][m]; if(!Object.keys(overlays[y][id]).length) delete overlays[y][id]; save(K.overlays,overlays); } }
 
+  // État d'ouverture de l'accordéon annuel (mémoire de session)
+  const DASH_GOPEN = new Set(ORDRE);   // groupes ouverts par défaut
+  const DASH_POPEN = new Set();        // postes dépliés (éditeur mensuel)
+
   function ledgerAnnuel(y) {
-    const head = `<thead><tr><th>Poste</th>${MOIS.map((m,i)=>`<th${i===moisCourant?' class="col-now"':''}>${m.slice(0,3)}</th>`).join("")}<th class="col-total">Total</th></tr></thead>`;
-    let body = "";
+    const rev = totalGroupeAnnee(y,"revenu");
+    let html = `<div class="annuel">`;
     ORDRE.forEach(g => {
       const ids = postesGroupe(g).filter(id => showAllPostes || posteUtilise(y,id));
       if (!ids.length) return;
-      body += `<tr class="group-row is-${g}"><th colspan="14">${GROUPES[g].label}</th></tr>`;
-      ids.forEach(id => {
-        let tot=0; const cells=[];
-        for(let m=0;m<12;m++){
-          const v = valDisplay(y,id,m); if(v!==null) tot+=v;
-          const ov = hasOverlay(y,id,m) ? " is-edited" : "";
-          cells.push(`<td class="cell${ov}"><input class="cell-input ${signe(v||0)}" data-cell="${id}|${m}" inputmode="decimal" value="${v===null?"":v}" aria-label="${POSTES[id].label} ${MOIS[m]}"></td>`);
-        }
-        body += `<tr><th><span class="dot dot--${g}"></span>${POSTES[id].label}</th>${cells.join("")}<td class="col-total ${signe(tot)}">${fmt(tot)}</td></tr>`;
-      });
-      const tm=[]; let ta=0;
-      for(let m=0;m<12;m++){ const t=totalGroupeMois(y,g,m); tm.push(t); ta+=t; }
-      body += `<tr class="total-row"><th>Total ${GROUPES[g].label.toLowerCase()}</th>${tm.map(t=>`<td class="${signe(t)}">${fmt(t)}</td>`).join("")}<td class="col-total ${signe(ta)}">${fmt(ta)}</td></tr>`;
+      const gTot = totalGroupeAnnee(y,g);
+      const gopen = DASH_GOPEN.has(g);
+      const cible = GROUPES[g].cible;
+      const pct = rev>0 ? Math.round(gTot/rev*100) : 0;
+      let meta = "";
+      if (cible){
+        const over = pct>cible;
+        meta = `<div class="grp__meta"><span>${pct} % · cible ${cible} %</span>
+          <div class="grp__bar${over?' over':''}"><span style="width:${Math.min(100, cible?pct/cible*100:0)}%"></span></div></div>`;
+      } else if (g!=="revenu"){
+        meta = `<div class="grp__meta"><span>${pct} % des revenus</span></div>`;
+      }
+      const postes = ids.map(id => {
+        let pTot=0; for(let m=0;m<12;m++){ const v=valDisplay(y,id,m); if(v!==null) pTot+=v; }
+        const popen = DASH_POPEN.has(id);
+        const editor = popen ? `<div class="mgrid">${MOIS.map((mn,m)=>{
+          const v=valDisplay(y,id,m); const ov=hasOverlay(y,id,m)?" is-edited":""; const now=m===moisCourant?" is-now":"";
+          return `<label class="mgrid__cell${ov}${now}"><span class="mgrid__mo">${mn.slice(0,3)}</span>
+            <input class="cell-input ${signe(v||0)}" data-cell="${id}|${m}" inputmode="decimal" value="${v===null?"":v}" aria-label="${POSTES[id].label} ${mn}"></label>`;
+        }).join("")}</div>` : "";
+        return `<div class="poste${popen?' is-open':''}">
+          <button class="poste__head" data-ptoggle="${id}" aria-expanded="${popen}">
+            <span class="poste__name"><span class="dot dot--${g}"></span>${POSTES[id].label}</span>
+            <span class="poste__tot num ${signe(pTot)}">${fmt(pTot)}<span class="poste__chev">▸</span></span>
+          </button>${editor}</div>`;
+      }).join("");
+      html += `<section class="grp grp--${g}${gopen?' is-open':''}">
+        <button class="grp__head" data-gtoggle="${g}" aria-expanded="${gopen}">
+          <span class="grp__chev">▸</span>
+          <span class="grp__name">${GROUPES[g].label}</span>
+          <span class="grp__tot num ${signe(gTot)}">${fmt(gTot)}</span>
+        </button>
+        ${meta}
+        <div class="grp__body">${postes}</div>
+      </section>`;
     });
-    return `<div class="ledger-wrap"><table class="ledger ledger--edit"><caption>Grand livre ${y} — éditable</caption>${head}<tbody>${body}</tbody></table></div>`;
+    return html + `</div>`;
   }
 
   // Créer une année : valeurs par défaut = moyenne mensuelle de l'an passé (objectif)

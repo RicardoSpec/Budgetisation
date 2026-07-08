@@ -46,7 +46,7 @@
   const ORDRE = ["revenu","besoin","desir","epargne","invest"];
 
   /* ---------- Stockage local ---------- */
-  const K = { years:"gl_years_v1", overlays:"gl_overlays_v1", tags:"gl_tags_v1", bank:"gl_tagbank_v1", pf:"gl_portfolio_v1", imports:"gl_imports_v1" };
+  const K = { years:"gl_years_v1", overlays:"gl_overlays_v1", tags:"gl_tags_v1", bank:"gl_tagbank_v1", pf:"gl_portfolio_v1", imports:"gl_imports_v1", banktx:"gl_banktx_v1" };
   const load = (k, def) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? def; } catch { return def; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn("Stockage indisponible", e); } };
 
@@ -56,6 +56,7 @@
   let tagBank  = load(K.bank, {});
   let PF       = load(K.pf, { accounts: [] });
   let IMPORTS  = load(K.imports, {});    // dédup imports externes : "coachmuscu:<id>" -> { y, m, poste, label, amount }
+  let BANKTX   = load(K.banktx, {});     // transactions bancaires : "bourso:<FITID>" -> { status, y, m, date, label, amount, poste }
   if (!PF.accounts) PF = { accounts: [] };
 
   // Banque d'étiquettes par catégorie (enrichie à la volée)
@@ -775,12 +776,269 @@
     renderAll();
   }
 
+  /* ====================================================================
+     Import Boursobank — transactions (OFX / CSV) puis tri façon "Tinder".
+     Écrit dans le réel (gl_tags_v1) du mois de la transaction.
+     Lecture de fichier uniquement ; dédup par FITID (OFX) ou empreinte (CSV).
+     ==================================================================== */
+
+  // Catégories de tri -> groupe(s) budget + poste par défaut du swipe.
+  const SWIPE_CATS = [
+    { key:"besoin", label:"Besoins", groups:["besoin"],           def:"courses" },
+    { key:"desir",  label:"Envies",  groups:["desir"],            def:"sorties" },
+    { key:"epargne",label:"Épargne", groups:["epargne","invest"], def:"ldds"    },
+  ];
+  const catPostes = c => c.groups.reduce((a,g)=>a.concat(postesGroupe(g)),[]);
+
+  function parseMontant(s){
+    s = String(s==null?"":s).replace(/\u00a0/g,"").replace(/\s/g,"").trim();
+    if(/,\d{1,2}$/.test(s)) s = s.replace(/\./g,"").replace(",",".");   // FR "1.234,56"
+    else s = s.replace(/,/g,"");
+    const v = parseFloat(s); return isFinite(v) ? v : NaN;
+  }
+  function ofxDate(s){
+    const t = String(s||"").replace(/[^0-9]/g,"");
+    if(t.length<8) return new Date();
+    return new Date(+t.slice(0,4), +t.slice(4,6)-1, +t.slice(6,8));
+  }
+  function parseFRDate(s){
+    s=String(s||"").trim();
+    let m = s.match(/^(\d{4})[-\/](\d{2})[-\/](\d{2})/); if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+    m = s.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})/);     if(m) return new Date(+m[3],+m[2]-1,+m[1]);
+    const d=new Date(s); return isNaN(d)?null:d;
+  }
+  function hashKey(str){ let h=0; for(let i=0;i<str.length;i++){ h=(h*31+str.charCodeAt(i))|0; } return "csv:"+(h>>>0).toString(36); }
+
+  // ---- OFX (SGML 1.x sans balises fermantes, et XML 2.x) ----
+  function parseOFX(text){
+    const out=[];
+    let scope = text;
+    const list = text.match(/<BANKTRANLIST>([\s\S]*?)<\/BANKTRANLIST>/i);
+    if(list) scope = list[1];
+    const parts = scope.split(/<STMTTRN>/i).slice(1);   // 1 part = 1 transaction, jusqu'au prochain <STMTTRN>
+    const field = (b,tag)=>{ const m=b.match(new RegExp("<"+tag+">([^<\\r\\n]*)","i")); return m?m[1].trim():""; };
+    parts.forEach(raw=>{
+      const b = raw.split(/<\/STMTTRN>/i)[0];           // couper si une balise fermante existe
+      const amount = parseMontant(field(b,"TRNAMT")); if(!isFinite(amount)) return;
+      const date = ofxDate(field(b,"DTPOSTED"));
+      const fitid = field(b,"FITID");
+      const name = field(b,"NAME") || field(b,"MEMO") || "Transaction";
+      const key = fitid ? "bourso:"+fitid : hashKey(date.toISOString().slice(0,10)+"|"+amount+"|"+name);
+      out.push({ key, date, amount, label:name });
+    });
+    return out;
+  }
+  // ---- CSV tolérant ----
+  function splitCSVLine(line, delim){
+    const res=[]; let cur="", q=false;
+    for(let i=0;i<line.length;i++){ const c=line[i];
+      if(c==='"'){ if(q&&line[i+1]==='"'){cur+='"';i++;} else q=!q; }
+      else if(c===delim && !q){ res.push(cur); cur=""; } else cur+=c;
+    }
+    res.push(cur); return res.map(s=>s.trim());
+  }
+  function parseBankCSV(text){
+    const lines = text.split(/\r?\n/).filter(l=>l.trim()!==""); if(!lines.length) return [];
+    const delim = (lines[0].match(/;/g)||[]).length >= (lines[0].match(/,/g)||[]).length ? ";" : ",";
+    const header = splitCSVLine(lines[0], delim).map(h=>h.toLowerCase());
+    const find = keys => header.findIndex(h => keys.some(k=>h.includes(k)));
+    const iDate = find(["dateop","date de","date"]);
+    const iAmt  = find(["montant","amount","valeur"]);
+    const iLbl  = find(["libell","label","nature","comment","opération","operation","description"]);
+    const out=[];
+    for(let r=1;r<lines.length;r++){
+      const cols = splitCSVLine(lines[r], delim);
+      const amount = parseMontant(cols[iAmt]); if(!isFinite(amount)) continue;
+      const date = parseFRDate(cols[iDate]) || new Date();
+      const label = (cols[iLbl]||"Transaction").trim() || "Transaction";
+      const key = hashKey(date.toISOString().slice(0,10)+"|"+amount+"|"+label);
+      out.push({ key, date, amount, label });
+    }
+    return out;
+  }
+  function parseBankFile(text){
+    if(/<OFX>|<STMTTRN>/i.test(text)) return { format:"ofx", txns:parseOFX(text) };
+    return { format:"csv", txns:parseBankCSV(text) };
+  }
+  function nettoieLibelle(s){
+    return String(s||"").replace(/\s+/g," ").replace(/^(CARTE|CB|PAIEMENT|ACHAT|VIR|PRLV|PRELEVEMENT)\s+/i,"").trim() || "Dépense";
+  }
+  // Ajoute les débits à la file d'attente. Idempotent (dédup par clé).
+  function bankIngest(text){
+    const { format, txns } = parseBankFile(text);
+    let ajoutees=0, connues=0, credits=0;
+    txns.forEach(t=>{
+      if(t.amount >= 0){ credits++; return; }                 // on ne trie que les dépenses (débits)
+      if(BANKTX[t.key]){ connues++; return; }                 // déjà vue -> idempotent
+      BANKTX[t.key]={ status:"pending", y:t.date.getFullYear(), m:t.date.getMonth(),
+                      date:t.date.toISOString().slice(0,10), label:nettoieLibelle(t.label), amount:Math.abs(t.amount) };
+      ajoutees++;
+    });
+    save(K.banktx, BANKTX);
+    return { format, ajoutees, connues, credits, total:txns.length };
+  }
+  const bankPending = () => Object.keys(BANKTX).filter(k=>BANKTX[k].status==="pending");
+
+  /* ---------- Overlay de tri "Tinder" ---------- */
+  let DECK=null, deckQueue=[], deckPtr=0, deckCat=SWIPE_CATS[0], deckPoste=SWIPE_CATS[0].def, deckStack=[];
+
+  function openDeck(){
+    deckQueue = bankPending(); deckPtr=0; deckStack=[];
+    deckCat = SWIPE_CATS[0]; deckPoste = SWIPE_CATS[0].def;
+    ensureDeck(); DECK.classList.add("is-open"); document.body.style.overflow="hidden";
+    renderDeck();
+  }
+  function closeDeck(){ if(DECK) DECK.classList.remove("is-open"); document.body.style.overflow=""; renderAll(); }
+
+  function ensureDeck(){
+    if(DECK) return;
+    DECK = document.createElement("div");
+    DECK.className="deck-overlay";
+    DECK.innerHTML = `
+      <div class="deck-head">
+        <button class="deck-x" data-deck="close" aria-label="Fermer">×</button>
+        <span class="deck-count" data-deck="count"></span>
+        <button class="deck-undo" data-deck="undo">↶ Annuler</button>
+      </div>
+      <div class="deck-stage" data-deck="stage"></div>
+      <div class="deck-cats" data-deck="cats"></div>
+      <div class="deck-postes" data-deck="postes"></div>
+      <div class="deck-bar">
+        <button class="deck-skip" data-deck="skip">Passer</button>
+        <button class="deck-ok" data-deck="valider">Valider →</button>
+      </div>`;
+    document.body.appendChild(DECK);
+    DECK.addEventListener("click", onDeckClick);
+    initSwipe();
+  }
+  function formatJour(iso){ const d=new Date(iso); return isNaN(d)?iso:d.toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"}); }
+
+  function renderDeck(){
+    const stage = DECK.querySelector("[data-deck='stage']");
+    const total = deckQueue.length;
+    DECK.querySelector("[data-deck='count']").textContent = total ? `${Math.min(deckPtr+1,total)} / ${total}` : "0";
+    DECK.querySelector("[data-deck='undo']").style.visibility = deckStack.length ? "visible" : "hidden";
+    DECK.querySelector("[data-deck='cats']").innerHTML = SWIPE_CATS.map(c=>
+      `<button class="deck-cat cat--${c.key} ${c.key===deckCat.key?'is-active':''}" data-cat="${c.key}">${c.label}</button>`).join("");
+    DECK.querySelector("[data-deck='postes']").innerHTML = catPostes(deckCat).map(id=>
+      `<button class="deck-poste ${id===deckPoste?'is-active':''}" data-poste="${id}">${POSTES[id].label}</button>`).join("");
+
+    const bar = DECK.querySelector(".deck-bar"), cats=DECK.querySelector(".deck-cats"), postes=DECK.querySelector(".deck-postes");
+    if(deckPtr>=total){
+      stage.innerHTML = `<div class="deck-done"><p>✓ Tout est trié.</p><button class="btn" data-deck="close">Fermer</button></div>`;
+      bar.style.display="none"; cats.style.display="none"; postes.style.display="none"; return;
+    }
+    bar.style.display=""; cats.style.display=""; postes.style.display="";
+    const tx = BANKTX[deckQueue[deckPtr]];
+    const next = deckQueue[deckPtr+1] ? BANKTX[deckQueue[deckPtr+1]] : null;
+    stage.innerHTML = `
+      ${next ? `<div class="deck-card deck-card--behind"><div class="deck-amt num">− ${fmt(next.amount)}</div></div>`:""}
+      <div class="deck-card deck-card--top" data-deck="card">
+        <div class="deck-date">${formatJour(tx.date)}</div>
+        <input class="deck-label" data-deck="label" value="${(tx.label||"").replace(/"/g,'&quot;')}" aria-label="Libellé de la dépense">
+        <div class="deck-amt num neg">− ${fmt(tx.amount)}</div>
+        <div class="deck-hint" data-deck="hint"></div>
+      </div>`;
+  }
+  function grabLabel(){
+    const inp = DECK && DECK.querySelector("[data-deck='label']"); if(!inp) return;
+    const key = deckQueue[deckPtr]; if(key && BANKTX[key]) BANKTX[key].label = inp.value.trim() || "Dépense";
+  }
+  function onDeckClick(e){
+    const cat=e.target.closest("[data-cat]"), pst=e.target.closest("[data-poste]"), a=e.target.closest("[data-deck]");
+    if(cat){ grabLabel(); deckCat = SWIPE_CATS.find(c=>c.key===cat.dataset.cat); deckPoste = deckCat.def; renderDeck(); return; }
+    if(pst){ deckPoste = pst.dataset.poste; commitCard(deckPoste); return; }
+    if(!a) return;
+    const act=a.dataset.deck;
+    if(act==="close") closeDeck();
+    else if(act==="undo") undoCard();
+    else if(act==="skip") skipCard();
+    else if(act==="valider") commitCard(deckPoste);
+  }
+  function commitCard(poste){
+    if(deckPtr>=deckQueue.length) return;
+    grabLabel();
+    const tx = BANKTX[deckQueue[deckPtr]], g = POSTES[poste].groupe;
+    ensureBag(tx.y, tx.m, poste);
+    const bl = (tx.label||"").trim() || "Dépense";
+    let label = bl, n=2; while(tags[tx.y][tx.m][poste][label]!==undefined){ label = bl+" ("+(n++)+")"; }
+    tags[tx.y][tx.m][poste][label] = tx.amount;
+    tx.status="assigned"; tx.poste=poste; tx.finalLabel=label;
+    tagBank[g]=tagBank[g]||[]; if(!tagBank[g].includes(bl)){ tagBank[g].push(bl); tagBank[g].sort((a,b)=>a.localeCompare(b,'fr')); }
+    save(K.tags,tags); save(K.banktx,BANKTX); save(K.bank,tagBank);
+    deckStack.push({ key:deckQueue[deckPtr], action:"assign", poste, label, y:tx.y, m:tx.m });
+    flyAndNext("right");
+  }
+  function skipCard(){
+    if(deckPtr>=deckQueue.length) return;
+    grabLabel();
+    BANKTX[deckQueue[deckPtr]].status="skipped"; save(K.banktx,BANKTX);
+    deckStack.push({ key:deckQueue[deckPtr], action:"skip" });
+    flyAndNext("left");
+  }
+  function undoCard(){
+    const last = deckStack.pop(); if(!last) return;
+    const tx = BANKTX[last.key];
+    if(last.action==="assign"){
+      if(tags[last.y]&&tags[last.y][last.m]&&tags[last.y][last.m][last.poste]) delete tags[last.y][last.m][last.poste][last.label];
+      delete tx.poste; delete tx.finalLabel; save(K.tags,tags);
+    }
+    tx.status="pending"; save(K.banktx,BANKTX);
+    deckPtr = Math.max(0, deckPtr-1); renderDeck();
+  }
+  function flyAndNext(dir){
+    const card = DECK.querySelector("[data-deck='card']");
+    if(card){ card.style.transition="transform .28s ease, opacity .28s ease";
+      card.style.transform = `translateX(${dir==="right"?"120%":"-120%"}) rotate(${dir==="right"?12:-12}deg)`; card.style.opacity="0"; }
+    setTimeout(()=>{ deckPtr++; renderDeck(); }, 170);
+  }
+  function initSwipe(){
+    let startX=0, dragging=false, card=null;
+    const stage = DECK.querySelector("[data-deck='stage']");
+    stage.addEventListener("pointerdown", e=>{
+      card = e.target.closest("[data-deck='card']"); if(!card) return;
+      if(e.target.closest("[data-deck='label']")){ card=null; return; }   // laisser éditer le libellé
+      dragging=true; startX=e.clientX; try{card.setPointerCapture(e.pointerId);}catch(_){}
+      card.style.transition="none";
+    });
+    stage.addEventListener("pointermove", e=>{
+      if(!dragging||!card) return;
+      const dx=e.clientX-startX;
+      card.style.transform = `translate(${dx}px, ${Math.abs(dx)*0.04}px) rotate(${dx/18}deg)`;
+      const hint = card.querySelector("[data-deck='hint']");
+      if(hint){ hint.textContent = dx>60 ? "→ "+POSTES[deckPoste].label : dx<-60 ? "Passer" : ""; hint.className = "deck-hint "+(dx>60?"pos":dx<-60?"neg":""); }
+    });
+    const end = e=>{
+      if(!dragging||!card){ dragging=false; card=null; return; }
+      dragging=false; const dx=e.clientX-startX;
+      if(dx>90) commitCard(deckPoste);
+      else if(dx<-90) skipCard();
+      else { card.style.transition="transform .2s ease"; card.style.transform=""; const h=card.querySelector("[data-deck='hint']"); if(h) h.textContent=""; }
+      card=null;
+    };
+    stage.addEventListener("pointerup", end);
+    stage.addEventListener("pointercancel", ()=>{ dragging=false; card=null; });
+  }
+
   function renderData() {
     const ys = Object.keys(YEARS).map(Number).sort((a,b)=>a-b);
+    const pendCount = bankPending().length;
     const annéesOptions = [];
     for (let yy=2020; yy<=2030; yy++) annéesOptions.push(`<option value="${yy}">${yy}</option>`);
     el("[data-fill='data']").innerHTML = `
       <div class="data-grid">
+        <div class="data-card data-card--bank">
+          <h3>Importer des dépenses — Boursobank</h3>
+          <p>Charge un export de <strong>transactions</strong> Boursobank (OFX de préférence, sinon CSV), puis trie les dépenses par swipe. Les crédits sont ignorés — ce flux ne traite que les dépenses. Rien n'est réécrit côté banque.</p>
+          <div class="field">
+            <input type="file" id="bankFile" accept=".ofx,.qfx,.csv,text/csv,application/x-ofx,application/octet-stream">
+            <button class="btn" id="doBankImport">Charger le fichier</button>
+          </div>
+          <p id="bankMsg" class="msg"></p>
+          <div class="field">
+            <button class="btn btn--accent" id="doDeck"${pendCount?"":" disabled"}>Trier les dépenses (${pendCount})</button>
+          </div>
+        </div>
         <div class="data-card">
           <h3>Importer une année</h3>
           <p>Sélectionne le fichier d'année que je t'ai fourni, choisis l'année concernée, puis importe.
@@ -831,6 +1089,30 @@
         </div>
       </div>`;
 
+    // Import Boursobank + ouverture du tri
+    el("#doBankImport").onclick = () => {
+      const f = el("#bankFile").files[0], msg = el("#bankMsg");
+      if(!f){ msg.className="msg err"; msg.textContent="Choisis d'abord un fichier OFX ou CSV Boursobank."; return; }
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const res = bankIngest(String(r.result));
+          const bits = [`${res.ajoutees} nouvelle(s) dépense(s)`];
+          if(res.connues) bits.push(`${res.connues} déjà connue(s)`);
+          if(res.credits) bits.push(`${res.credits} crédit(s) ignoré(s)`);
+          if(res.ajoutees===0 && res.total===0) { msg.className="msg err"; msg.textContent="Aucune transaction lue. Vérifie que c'est bien un export de mouvements Boursobank (OFX/CSV)."; return; }
+          msg.className="msg ok"; msg.textContent = bits.join(" · ") + ` (format ${res.format.toUpperCase()}).`;
+          renderData();
+          if(res.ajoutees>0) setTimeout(openDeck, 150);
+        } catch { msg.className="msg err"; msg.textContent="Fichier illisible."; }
+      };
+      r.readAsText(f);
+    };
+    el("#doDeck").onclick = () => {
+      if(bankPending().length) openDeck();
+      else { const msg=el("#bankMsg"); msg.className="msg"; msg.textContent="Rien à trier pour l'instant."; }
+    };
+
     // Import d'une année
     el("#doYearImport").onclick = () => {
       const f = el("#yearFile").files[0], msg = el("#yearMsg");
@@ -869,7 +1151,7 @@
 
     // Sauvegarde globale
     el("#doExport").onclick = () => {
-      const blob = new Blob([JSON.stringify({ years:YEARS, overlays, tags, tagBank, portfolio:PF, imports:IMPORTS }, null, 2)], { type:"application/json" });
+      const blob = new Blob([JSON.stringify({ years:YEARS, overlays, tags, tagBank, portfolio:PF, imports:IMPORTS, banktx:BANKTX }, null, 2)], { type:"application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = `grand-livre-sauvegarde-${new Date().toISOString().slice(0,10)}.json`;
@@ -889,6 +1171,7 @@
           if (d.tagBank) { tagBank=d.tagBank; save(K.bank,tagBank); }
           if (d.portfolio) { PF=d.portfolio; if(!PF.accounts) PF={accounts:[]}; save(K.pf,PF); }
           if (d.imports) { IMPORTS=d.imports; save(K.imports,IMPORTS); }
+          if (d.banktx) { BANKTX=d.banktx; save(K.banktx,BANKTX); }
           refreshAnnees(); msg.className="msg ok"; msg.textContent="Sauvegarde restaurée.";
           initYearSelect(); renderAll();
         } catch { msg.className="msg err"; msg.textContent="Fichier de sauvegarde illisible."; }
@@ -897,7 +1180,7 @@
     };
     el("#doWipe").onclick = () => {
       if (!confirm("Effacer tes modifications et tags ? Les années importées restent intactes.")) return;
-      overlays={}; tags={}; IMPORTS={}; save(K.overlays,overlays); save(K.tags,tags); save(K.imports,IMPORTS);
+      overlays={}; tags={}; IMPORTS={}; BANKTX={}; save(K.overlays,overlays); save(K.tags,tags); save(K.imports,IMPORTS); save(K.banktx,BANKTX);
       el("#backupMsg").className="msg ok"; el("#backupMsg").textContent="Modifications effacées.";
       renderAll();
     };

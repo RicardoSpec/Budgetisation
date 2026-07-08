@@ -539,3 +539,66 @@ td.cell.is-edited { background: #fff6e6; box-shadow: inset 0 0 0 1px var(--desir
 .coach-file summary::-webkit-details-marker { display: none; }
 .coach-file summary::before { content: "▸ "; }
 .coach-file[open] summary::before { content: "▾ "; }
+
+/* ===================== Import Boursobank + tri "Tinder" ===================== */
+.data-card--bank { border-left: 3px solid var(--accent); }
+.btn--accent { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn--accent:disabled { opacity: .45; cursor: not-allowed; }
+
+.deck-overlay {
+  position: fixed; inset: 0; z-index: 200; display: none;
+  flex-direction: column; background: var(--paper);
+  padding: max(.8rem, env(safe-area-inset-top)) .9rem max(1rem, env(safe-area-inset-bottom));
+}
+.deck-overlay.is-open { display: flex; }
+
+.deck-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .4rem; }
+.deck-x { background: none; border: 0; font-size: 1.9rem; line-height: 1; color: var(--ink-soft); cursor: pointer; width: 2.2rem; }
+.deck-count { font-family: var(--mono); font-size: .95rem; color: var(--ink-soft); }
+.deck-undo { background: none; border: 1px solid var(--rule-strong); border-radius: 999px; padding: .25rem .7rem; font-size: .8rem; color: var(--ink-soft); cursor: pointer; }
+
+.deck-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.deck-card {
+  position: absolute; width: min(92vw, 420px); box-sizing: border-box;
+  background: var(--card); border: 1px solid var(--rule); border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(22,48,43,.16); padding: 1.6rem 1.4rem;
+  display: flex; flex-direction: column; gap: .9rem; text-align: center; touch-action: pan-y;
+}
+.deck-card--behind { transform: scale(.94) translateY(14px); opacity: .5; box-shadow: none; }
+.deck-card--top { cursor: grab; }
+.deck-card--top:active { cursor: grabbing; }
+.deck-date { font-size: .82rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .05em; }
+.deck-label {
+  font-family: var(--body); font-size: 1.25rem; font-weight: 600; color: var(--ink); text-align: center;
+  border: 0; border-bottom: 1px dashed var(--rule-strong); background: none; padding: .35rem .2rem; width: 100%;
+}
+.deck-label:focus { outline: none; border-bottom-color: var(--accent); }
+.deck-amt { font-family: var(--mono); font-size: 2.3rem; font-weight: 700; }
+.deck-amt.neg { color: var(--neg); }
+.deck-hint { min-height: 1.2rem; font-weight: 700; font-size: 1rem; }
+.deck-hint.pos { color: var(--epargne); }
+.deck-hint.neg { color: var(--ink-faint); }
+.deck-done { text-align: center; color: var(--ink-soft); }
+.deck-done p { font-size: 1.15rem; margin-bottom: 1rem; }
+
+.deck-cats { display: flex; gap: .5rem; margin: .7rem 0 .4rem; }
+.deck-cat {
+  flex: 1; padding: .6rem .3rem; border-radius: 12px; border: 1.5px solid var(--rule-strong);
+  background: var(--card); font-family: var(--body); font-weight: 600; font-size: .9rem; color: var(--ink-soft); cursor: pointer;
+}
+.deck-cat.is-active { color: #fff; }
+.deck-cat.cat--besoin.is-active  { background: var(--besoin);  border-color: var(--besoin); }
+.deck-cat.cat--desir.is-active   { background: var(--desir);   border-color: var(--desir); }
+.deck-cat.cat--epargne.is-active { background: var(--epargne); border-color: var(--epargne); }
+
+.deck-postes { display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .3rem; -webkit-overflow-scrolling: touch; }
+.deck-poste {
+  flex: 0 0 auto; padding: .45rem .8rem; border-radius: 999px; border: 1px solid var(--rule-strong);
+  background: var(--card); font-size: .82rem; color: var(--ink-soft); white-space: nowrap; cursor: pointer;
+}
+.deck-poste.is-active { background: var(--ink); color: var(--accent-ink); border-color: var(--ink); }
+
+.deck-bar { display: flex; gap: .7rem; margin-top: .7rem; }
+.deck-skip, .deck-ok { flex: 1; padding: .95rem; border-radius: 14px; font-family: var(--body); font-weight: 700; font-size: 1rem; cursor: pointer; }
+.deck-skip { background: var(--card); border: 1.5px solid var(--rule-strong); color: var(--ink-soft); }
+.deck-ok { background: var(--accent); border: 1.5px solid var(--accent); color: var(--accent-ink); }

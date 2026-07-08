@@ -602,3 +602,91 @@ td.cell.is-edited { background: #fff6e6; box-shadow: inset 0 0 0 1px var(--desir
 .deck-skip, .deck-ok { flex: 1; padding: .95rem; border-radius: 14px; font-family: var(--body); font-weight: 700; font-size: 1rem; cursor: pointer; }
 .deck-skip { background: var(--card); border: 1.5px solid var(--rule-strong); color: var(--ink-soft); }
 .deck-ok { background: var(--accent); border: 1.5px solid var(--accent); color: var(--accent-ink); }
+
+/* ============================================================
+   Refonte UI (Lot 1) — vue annuelle en accordéon + polish mobile
+   ============================================================ */
+
+/* --- KPI plus compacts et défilables sur mobile --- */
+@media (max-width: 640px){
+  .kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: .55rem; }
+  .kpi { padding: .6rem .7rem; }
+  .kpi__label { font-size: .68rem; }
+  .kpi__value { font-size: 1.15rem; }
+  .kpi__sub { font-size: .64rem; }
+}
+
+/* --- Barre d'outils : boutons pleine largeur au pouce --- */
+@media (max-width: 640px){
+  .toolbar { gap: .5rem; }
+  .toolbar .btn { flex: 1 1 auto; }
+  .toolbar .hint { flex-basis: 100%; font-size: .72rem; }
+}
+
+/* --- Accordéon annuel --- */
+.annuel { display: flex; flex-direction: column; gap: .7rem; margin-top: .3rem; }
+
+.grp { background: var(--card); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); }
+.grp__head {
+  width: 100%; display: flex; align-items: center; gap: .6rem; padding: .8rem .9rem;
+  background: none; border: 0; cursor: pointer; font-family: var(--body); text-align: left;
+  border-left: 3px solid transparent;
+}
+.grp--revenu  .grp__head { border-left-color: var(--revenu); }
+.grp--besoin  .grp__head { border-left-color: var(--besoin); }
+.grp--desir   .grp__head { border-left-color: var(--desir); }
+.grp--epargne .grp__head { border-left-color: var(--epargne); }
+.grp--invest  .grp__head { border-left-color: var(--invest); }
+.grp__chev { color: var(--ink-faint); transition: transform .18s; font-size: .8rem; }
+.grp.is-open .grp__chev { transform: rotate(90deg); }
+.grp__name { font-family: var(--display, var(--body)); font-weight: 600; font-size: 1.05rem; color: var(--ink); }
+.grp__tot { margin-left: auto; font-family: var(--mono); font-weight: 600; font-size: 1.05rem; }
+
+.grp__meta { display: flex; align-items: center; gap: .7rem; padding: 0 .9rem .6rem 1.5rem; font-size: .74rem; color: var(--ink-faint); }
+.grp__meta > span { white-space: nowrap; }
+.grp__bar { flex: 1; height: 5px; border-radius: 999px; background: #e6ebe8; overflow: hidden; }
+.grp__bar > span { display: block; height: 100%; background: var(--epargne); border-radius: 999px; }
+.grp--besoin .grp__bar > span { background: var(--besoin); }
+.grp--desir  .grp__bar > span { background: var(--desir); }
+.grp__bar.over > span { background: var(--neg); }
+
+.grp__body { display: none; padding: 0 .5rem .4rem; }
+.grp.is-open .grp__body { display: block; }
+
+/* --- Poste (ligne dépliable) --- */
+.poste { border-top: 1px solid var(--rule); }
+.grp__body .poste:first-child { border-top: 0; }
+.poste__head {
+  width: 100%; display: flex; align-items: center; gap: .5rem; padding: .6rem .5rem;
+  background: none; border: 0; cursor: pointer; font-family: var(--body); text-align: left;
+}
+.poste__head:hover { background: #f4f7f5; border-radius: 8px; }
+.poste__name { font-size: .92rem; color: var(--ink); display: flex; align-items: center; gap: .5rem; }
+.poste__tot { margin-left: auto; font-family: var(--mono); font-weight: 500; display: inline-flex; align-items: center; gap: .35rem; }
+.poste__chev { color: var(--ink-faint); font-size: .72rem; transition: transform .18s; }
+.poste.is-open .poste__chev { transform: rotate(90deg); }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+.dot--revenu{background:var(--revenu)} .dot--besoin{background:var(--besoin)} .dot--desir{background:var(--desir)} .dot--epargne{background:var(--epargne)} .dot--invest{background:var(--invest)}
+
+/* --- Éditeur mensuel (grille verticale, aucun scroll horizontal) --- */
+.mgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; padding: .3rem .5rem .8rem; }
+@media (min-width: 520px){ .mgrid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 820px){ .mgrid { grid-template-columns: repeat(6, 1fr); } }
+.mgrid__cell { display: flex; flex-direction: column; gap: .15rem; background: #f6f9f7; border: 1px solid var(--rule); border-radius: 9px; padding: .35rem .4rem; }
+.mgrid__cell.is-now { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.mgrid__cell.is-edited { background: #fff7e8; border-color: var(--desir); }
+.mgrid__mo { font-size: .64rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); }
+.mgrid__cell .cell-input {
+  border: 0; background: none; width: 100%; font-family: var(--mono); font-size: .92rem; font-weight: 500;
+  color: var(--ink); padding: .1rem 0; text-align: right;
+}
+.mgrid__cell .cell-input:focus { outline: none; }
+.mgrid__cell .cell-input.neg { color: var(--neg); }
+
+/* --- Onglets défilables (mobile) --- */
+@media (max-width: 640px){
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { white-space: nowrap; flex: 0 0 auto; }
+}

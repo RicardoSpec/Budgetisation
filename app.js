@@ -278,14 +278,18 @@
   function netReelMois(y,m){ return reelGroupeMois(y,"revenu",m)-reelGroupeMois(y,"besoin",m)-reelGroupeMois(y,"desir",m)-reelGroupeMois(y,"epargne",m)-reelGroupeMois(y,"invest",m); }
   function netPrevuMois(y,m){ return totalGroupeMois(y,"revenu",m)-totalGroupeMois(y,"besoin",m)-totalGroupeMois(y,"desir",m)-totalGroupeMois(y,"epargne",m)-totalGroupeMois(y,"invest",m); }
 
-  // Trésorerie cumulée depuis le solde de départ.
-  // Réel (= compte Boursobank) pour les mois réalisés ; prévisionnel pour les mois futurs.
+  // Trésorerie = compte Boursobank.
+  // Mois réalisé : on renvoie le « réel compte » importé (soldeReel) = la vérité.
+  // Au-delà : projection depuis le dernier « réel compte » connu + net prévu.
   function soldeTresorerie(y,m){
-    const dep=YEARS[y].soldeDepart||0; let run=dep, futur=false;
-    for(let k=0;k<=m;k++){
-      if(moisRealise(y,k)) run+=netReelMois(y,k);
-      else { run+=netPrevuMois(y,k); futur=true; }
-    }
+    const Y=YEARS[y]||{}; const sr=Y.soldeReel||[];
+    if(moisRealise(y,m) && sr[m]!=null) return { value: sr[m], futur:false };
+    let anchor=null, start=0;
+    for(let k=0;k<12;k++){ if(sr[k]!=null && moisRealise(y,k)){ anchor=sr[k]; start=k+1; } }
+    const futur=!moisRealise(y,m);
+    let run;
+    if(anchor!=null){ run=anchor; for(let k=start;k<=m;k++) run += (moisRealise(y,k)?netReelMois(y,k):netPrevuMois(y,k)); }
+    else { run=Y.soldeDepart||0; for(let k=0;k<=m;k++) run += (moisRealise(y,k)?netReelMois(y,k):netPrevuMois(y,k)); }
     return { value: run, futur };
   }
 
@@ -1132,6 +1136,9 @@
 
   function buildXlsxImport(parsed){
     const lignes=parsed.lignes, tags={};
+    // Revenu(s) sans nom du tableur → rangé(s) par défaut sur « autre » (revenu),
+    // pour que le solde et les revenus du mois soient complets (ex. 3387 € en juin).
+    (parsed.revenusNonMappes||[]).forEach(rn=>{ if(rn.valeurs.some(v=>v)){ lignes.autre = lignes.autre || new Array(12).fill(0); rn.valeurs.forEach((v,i)=> lignes.autre[i]+=v); } });
     // Le réel n'existe que pour les mois RÉALISÉS (passés + mois en cours) ;
     // les mois futurs restent en prévu seul (aucune étiquette semée).
     const now=new Date();
@@ -1151,7 +1158,7 @@
     const soldeReel = (parsed.soldeReel||[]).map((v,i)=> i>realizedMax ? null : v);
     const mm=["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."];
     const warnings=[];
-    (parsed.revenusNonMappes||[]).forEach(rn=>{ const nz=rn.valeurs.map((v,i)=>v?`${mm[i]} ${v}`:null).filter(Boolean); const tot=rn.valeurs.reduce((a,b)=>a+b,0); if(tot) warnings.push(`Revenu sans nom (ligne ${rn.row}) : ${nz.join(", ")} — total ${tot} € — non importé. Ajoute-le à la main après import, ou dis-moi son poste.`); });
+    (parsed.revenusNonMappes||[]).forEach(rn=>{ const nz=rn.valeurs.map((v,i)=>v?`${mm[i]} ${v}`:null).filter(Boolean); const tot=rn.valeurs.reduce((a,b)=>a+b,0); if(tot) warnings.push(`Revenu sans nom (ligne ${rn.row}) : ${nz.join(", ")} — total ${tot} € — importé sur le poste « Autre » (revenu). Dis-moi son vrai poste pour le reclasser.`); });
     (parsed.unmapped||[]).forEach(u=>warnings.push(`Ligne « ${u.label} » (ligne ${u.row}) non reconnue — non importée.`));
     return { annee:parsed.annee, soldeDepart:parsed.soldeDepart, soldeReel, lignes, tags, warnings, stats:{nbPostes:Object.keys(lignes).length, nbTags, nbGranular, filled:moisSemes} };
   }

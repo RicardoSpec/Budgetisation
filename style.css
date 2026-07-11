@@ -749,3 +749,35 @@ body { padding-bottom: calc(env(safe-area-inset-bottom) + 76px); }
 
 /* Cartes un peu plus arrondies */
 .data-card, .kpi, .grp, .ms-card { border-radius: 14px; }
+
+/* ===== Écran de contrôle de l'import .xlsx ===== */
+.xlsx-confirm{margin-top:.8rem;padding:.85rem;border:1px solid #d5dee8;border-left:4px solid #12466B;border-radius:12px;background:#f7fafd;font-size:.92rem}
+.xlsx-confirm__head{margin-bottom:.4rem}
+.xlsx-confirm__head strong{color:#12466B}
+.xlsx-sum{margin:.25rem 0;line-height:1.35}
+.xlsx-warn{margin:.5rem 0;padding:.55rem .7rem;background:#fff4e8;border:1px solid #f4c69b;border-radius:8px;color:#7a3d12;line-height:1.35}
+.xlsx-det{margin:.55rem 0}
+.xlsx-det summary{cursor:pointer;color:#12466B;font-weight:600}
+.xlsx-table{width:100%;border-collapse:collapse;margin-top:.5rem;font-size:.88rem}
+.xlsx-table th,.xlsx-table td{padding:.28rem .4rem;border-bottom:1px solid #e6edf4;text-align:left}
+.xlsx-table td.num,.xlsx-table th.num{text-align:right;font-variant-numeric:tabular-nums}
+.xlsx-table td.muted{color:#8a97a6}
+.xlsx-actions{display:flex;gap:.6rem;justify-content:flex-end;margin-top:.7rem;flex-wrap:wrap}
+
+/* ===== Bandeau d'accueil « Ce mois-ci » ===== */
+.home-hero{background:#fff;border:1px solid #e3e9f0;border-radius:16px;padding:1rem 1.05rem;margin-bottom:.7rem;box-shadow:0 1px 3px rgba(18,70,107,.06)}
+.hero-solde{display:flex;flex-direction:column;gap:.05rem;margin-bottom:.8rem}
+.hero-solde__label{font-size:.8rem;color:#5a6b7d;font-weight:600}
+.hero-solde__val{font-size:2.15rem;font-weight:800;color:#12303f;line-height:1.1;font-variant-numeric:tabular-nums}
+.hero-solde__val.neg{color:#c0392b}
+.hero-solde__hint{font-size:.72rem;color:#8a97a6}
+.hero-spend{margin-bottom:.85rem}
+.hero-spend__bar{height:8px;border-radius:6px;background:#eef2f6;overflow:hidden;margin-bottom:.45rem}
+.hero-spend__bar span{display:block;height:100%;border-radius:6px;background:#12466B;transition:width .3s ease}
+.hero-spend__row{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;font-size:.9rem;flex-wrap:wrap}
+.hero-spend__spent{color:#3a4b5c}
+.hero-spend__spent .num{font-weight:700;color:#12303f}
+.hero-reste{font-weight:600;color:#12303f}
+.hero-reste .num{font-weight:800}
+.hero-reste.neg,.hero-reste.neg .num{color:#c0392b}
+.hero-cta{width:100%;justify-content:center;font-size:.98rem;padding:.72rem}

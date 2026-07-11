@@ -781,3 +781,8 @@ body { padding-bottom: calc(env(safe-area-inset-bottom) + 76px); }
 .hero-reste .num{font-weight:800}
 .hero-reste.neg,.hero-reste.neg .num{color:#c0392b}
 .hero-cta{width:100%;justify-content:center;font-size:.98rem;padding:.72rem}
+
+/* En-tête de groupe : montant lisible sur fond coloré (fini le vert-sur-vert) */
+.mblock__head{color:#fff}
+.mblock__sum .num,.mblock__sum .num.pos,.mblock__sum .num.neg{color:#fff}
+.mblock__prevu{color:rgba(255,255,255,.85)}

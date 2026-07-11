@@ -786,3 +786,20 @@ body { padding-bottom: calc(env(safe-area-inset-bottom) + 76px); }
 .mblock__head{color:#fff}
 .mblock__sum .num,.mblock__sum .num.pos,.mblock__sum .num.neg{color:#fff}
 .mblock__prevu{color:rgba(255,255,255,.85)}
+
+/* Classement manuel des valeurs inconnues (écran de contrôle) */
+.xlsx-unknowns{margin:.6rem 0;padding:.6rem .7rem;background:#eef4fb;border:1px solid #cfe0f0;border-radius:8px}
+.xlsx-unknowns__title{font-weight:600;color:#12466B;font-size:.85rem;margin-bottom:.45rem}
+.xlsx-unknown{display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.4rem 0}
+.xlsx-unknown__desc{font-size:.85rem;color:#3a4b5c}
+.xlsx-unknown__sel{padding:.32rem .45rem;border:1px solid #c3d1e0;border-radius:6px;background:#fff;font-size:.85rem;max-width:58%}
+/* Date d'arrêté */
+.xlsx-asof{margin:.6rem 0;padding:.6rem .7rem;background:#f4f7fa;border:1px solid #dbe4ee;border-radius:8px}
+.xlsx-asof label{font-weight:600;color:#12303f;font-size:.88rem}
+.xlsx-asof input[type=date]{padding:.32rem .5rem;border:1px solid #c3d1e0;border-radius:6px;font-size:.88rem;margin-left:.25rem}
+.xlsx-asof__hint{font-size:.75rem;color:#5a6b7d;margin-top:.35rem}
+
+/* Lot 3 — montants en encre foncée dans les bulles ; couleur réservée au rouge (négatif) */
+.bubble__reel .num.pos { color: var(--ink); }
+.bubble__reel .num.neg { color: var(--neg); }
+.bubble__ecart.pos strong { color: var(--ink); }

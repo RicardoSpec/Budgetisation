@@ -72,6 +72,7 @@
 
   /* ---------- État ---------- */
   let anneeCourante = null, moisCourant = 0;
+  const defaultMonth = y => (y === new Date().getFullYear()) ? new Date().getMonth() : 0;
   function refreshAnnees() {
     const ys = Object.keys(YEARS).map(Number).sort((a,b)=>a-b);
     if (!ys.includes(anneeCourante)) anneeCourante = ys[ys.length-1] ?? null;
@@ -290,19 +291,39 @@
 
   function renderMonth(){
     const host = el("[data-fill='month']");
-    if (anneeCourante === null) { host.innerHTML = `<div class="empty"><p>Importe d'abord une année.</p></div>`; return; }
+    if (anneeCourante === null) {
+      host.innerHTML = `<div class="empty"><p><strong>Bienvenue dans Grand livre.</strong></p><p class="muted" style="margin:.3rem 0 .9rem">Importe ton classeur pour démarrer ton suivi du mois.</p><button class="btn btn--accent" data-goimport>Importer mon budget</button></div>`;
+      const b = host.querySelector("[data-goimport]"); if (b) b.onclick = () => activerTab("data");
+      return;
+    }
     const y = anneeCourante, m = moisCourant;
 
     const chips = MOIS.map((mn,i)=>`<button class="mchip ${i===m?'is-active':''}" data-month="${i}">${mn.slice(0,3)}</button>`).join("");
 
-    // Barre figée : trésorerie cumulée = pont avec le compte Boursobank.
+    // Bandeau d'accueil : solde du compte + dépensé/budget + reste à dépenser + action.
     const tr = soldeTresorerie(y,m);
-    const tresoBar = `
-      <div class="treso-sticky">
-        <span class="treso-sticky__label">Trésorerie · fin ${MOIS[m]}</span>
-        <strong class="treso-sticky__val num ${signe(tr.value)}">${fmt(tr.value)}</strong>
-        <span class="treso-sticky__hint">${tr.futur?"prévisionnel":"réel · solde Boursobank"}</span>
-      </div>`;
+    const depense = reelGroupeMois(y,"besoin",m) + reelGroupeMois(y,"desir",m);
+    const budget  = totalGroupeMois(y,"besoin",m) + totalGroupeMois(y,"desir",m);
+    const reste   = budget - depense;
+    const pct     = budget>0 ? Math.max(0, Math.min(100, Math.round(depense/budget*100))) : 0;
+    const pend    = bankPending().length;
+    const ctaLabel = pend>0 ? `Trier mes ${pend} dépenses Boursobank` : "Importer des dépenses";
+    const hero = `
+      <section class="home-hero">
+        <div class="hero-solde">
+          <span class="hero-solde__label">Solde du compte · fin ${MOIS[m]}</span>
+          <strong class="hero-solde__val num ${tr.value<0?'neg':''}">${fmt(tr.value)}</strong>
+          <span class="hero-solde__hint">${tr.futur?"prévisionnel":"réel · Boursobank"}</span>
+        </div>
+        <div class="hero-spend">
+          <div class="hero-spend__bar"><span style="width:${pct}%"></span></div>
+          <div class="hero-spend__row">
+            <span class="hero-spend__spent">Dépensé <strong class="num">${fmt(depense)}</strong> <span class="muted">/ ${fmt(budget)} prévu</span></span>
+            <span class="hero-reste ${reste<0?'neg':''}">${reste>=0?`il te reste <strong class="num">${fmt(reste)}</strong>`:`dépassé de <strong class="num">${fmt(-reste)}</strong>`}</span>
+          </div>
+        </div>
+        <button class="btn btn--accent hero-cta" data-homecta>${ctaLabel}</button>
+      </section>`;
 
     const caption = `
       <div class="month-caption">
@@ -322,7 +343,7 @@
         <div class="ms-card"><span class="ms-card__label">Reste à recevoir</span><strong class="num">${fmt(resteR)}</strong></div>
       </section>`;
 
-    host.innerHTML = `<div class="mchips" role="tablist">${chips}</div>${tresoBar}${caption}<div class="blocks">${blocks}</div>${summary}`;
+    host.innerHTML = `${hero}<div class="mchips" role="tablist">${chips}</div>${caption}<div class="blocks">${blocks}</div>${summary}`;
     if (!monthBound) { monthBound = true; bindMonth(); }
   }
 
@@ -397,6 +418,9 @@
     const panel = el("#panel-month");
 
     panel.addEventListener("click", e => {
+      const cta = e.target.closest("[data-homecta]");
+      if (cta){ if(bankPending().length) openDeck(); else activerTab("data"); return; }
+
       const mc = e.target.closest("[data-month]");
       if (mc){ moisCourant = +mc.dataset.month; renderMonth(); return; }
 
@@ -1052,6 +1076,86 @@
     stage.addEventListener("pointercancel", ()=>{ dragging=false; card=null; });
   }
 
+  /* ====================================================================
+     Import classeur .xlsx (onglet Annuel + onglets mensuels)
+     parseWorkbook : lit le classeur -> {lignes, soldeDepart, soldeReel, étiquettes}
+     buildXlsxImport : applique la stratégie de réel (étiquettes) + avertissements
+     ==================================================================== */
+  const XL_MOIS = ["Janvier","Fevrier","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  const glNorm = s => s==null ? "" : String(s).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ");
+  const glNum  = v => { if(v==null||v==="") return null; if(typeof v==="number") return v; const t=String(v).replace(/[\u202f\u00a0 ]/g,"").replace(",","."); const n=parseFloat(t); return isNaN(n)?null:n; };
+  const POSTE_RULES = [["revenu (paiement","salaire"],["apl","apl"],["prime activite","prime"],["exceptionnel","exceptionnel"],["courses","courses"],["abonnement divers","abonnements"],["loyer cc","loyer"],["tan + sncf","tanSncf"],["sorties, meubles","sorties"],["medic","medic"],["assu vie greengot","assuVieGreenGot"],["assurance vie","assuranceVie"],["actions greengot","greengotActions"],["time for the planet","timeplanet"],["cto bourso","cto"],["lita","lita"],["epargne pilotee","epargnePilotee"],["coinbase","coinbase"],["hoplunch","hoplunch"],["divers","divers"]];
+  const POSTE_EXACT = {ldds:"ldds",pea:"pea",pee:"pee",lep:"lep",cel:"cel",pel:"pel",per:"per",lcl:"lcl"};
+  const SKIP_ROWS = ["ne pas utliser","depense totale","fin du mois","revenus","charges","estimation divers","revenu a recevoir","reel compte","solde budget","pour 2027","ecotree","prevision modifiable","budget atteint","budget en cours","autres","sodle actuel","restant","verif solde"];
+  function glPosteOf(label){ const n=glNorm(label); if(!n) return null; if(SKIP_ROWS.some(s=>n.startsWith(s))) return null; for(const [pat,pid] of POSTE_RULES){ if(n.startsWith(pat)) return pid; } return POSTE_EXACT[n]||null; }
+  function glRows(ws){ return XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:true}); }
+  const glCell = (r,i)=> (r && i<r.length) ? r[i] : null;
+
+  function parseWorkbook(wb){
+    const ws = wb.Sheets["Annuel"];
+    if(!ws) throw new Error("onglet « Annuel » introuvable");
+    const rows = glRows(ws);
+    const lignes = {}, unmapped = [], revenusNonMappes = [];
+    for(let i=7;i<=50 && i<rows.length;i++){
+      const r=rows[i], label=glCell(r,1);
+      const months=[]; for(let c=4;c<=15;c++) months.push(glNum(glCell(r,c)));
+      if(months.every(m=>m===null)) continue;
+      const pid=glPosteOf(label);
+      if(!pid){
+        if(i>=7 && i<=11) revenusNonMappes.push({row:i+1, valeurs:months.map(m=>m==null?0:Math.round(m))});
+        else { const n=glNorm(label); if(n && !SKIP_ROWS.some(s=>n.startsWith(s))) unmapped.push({row:i+1,label:String(label)}); }
+        continue;
+      }
+      lignes[pid]=months.map(m=> m==null?0:Math.round(m*100)/100);
+    }
+    const soldeReel=new Array(12).fill(null); let soldeDepart=null, filled=0;
+    const reelParPoste={}, tagsVentiles={};
+    for(let midx=0; midx<12; midx++){
+      const wsm=wb.Sheets[XL_MOIS[midx]]; if(!wsm) continue;
+      const rs=glRows(wsm); const preel={}, tags={}; let cur=null, hasData=false;
+      for(const r of rs){
+        const fl=glCell(r,5), fv=glNum(glCell(r,6)); const pid=glPosteOf(fl);
+        if(pid && fv!==null){ preel[pid]=Math.round(fv*100)/100; hasData=true; }
+        if(fl && glNorm(fl).startsWith("solde budget m-1")){ for(let c=6;c<12;c++){ const v=glNum(glCell(r,c)); if(v!==null){ if(soldeDepart===null) soldeDepart=Math.round(v*100)/100; break; } } }
+        for(let c=0;c<(r?r.length:0);c++){ if(typeof r[c]==="string" && glNorm(r[c]).startsWith("reel compte")){ for(let c2=c+1;c2<Math.min(c+4,r.length);c2++){ const v=glNum(r[c2]); if(v!==null){ soldeReel[midx]=Math.round(v*100)/100; break; } } break; } }
+        const il=glCell(r,8), jv=glNum(glCell(r,9)); const head=glPosteOf(il);
+        if(head){ cur=head; if(!tags[cur]) tags[cur]={}; continue; }
+        if(il && glNorm(il).startsWith("restant")){ cur=null; continue; }
+        if(cur && il && jv!==null){ const lab=String(il).trim(); tags[cur][lab]=(tags[cur][lab]||0)+Math.round(jv*100)/100; }
+      }
+      if(hasData) filled=midx+1;
+      reelParPoste[midx]=preel;
+      const clean={}; for(const k in tags){ if(Object.keys(tags[k]).length) clean[k]=tags[k]; } tagsVentiles[midx]=clean;
+    }
+    return { annee:2026, filled, soldeDepart, soldeReel, lignes, tagsVentiles, reelParPoste, unmapped, revenusNonMappes };
+  }
+
+  function buildXlsxImport(parsed){
+    const lignes=parsed.lignes, tags={};
+    // Le réel n'existe que pour les mois RÉALISÉS (passés + mois en cours) ;
+    // les mois futurs restent en prévu seul (aucune étiquette semée).
+    const now=new Date();
+    const realizedMax = parsed.annee < now.getFullYear() ? 11 : (parsed.annee > now.getFullYear() ? -1 : now.getMonth());
+    const maxM = Math.min((parsed.filled||0)-1, realizedMax);
+    let nbTags=0, nbGranular=0, moisSemes=0;
+    for(let m=0;m<=maxM;m++){
+      tags[m]={}; const gran=parsed.tagsVentiles[m]||{}, colG=parsed.reelParPoste[m]||{};
+      for(const pid in lignes){
+        const annuel=lignes[pid][m];
+        const reel=(colG[pid]!==undefined && colG[pid]!==null)?colG[pid]:annuel;
+        if(gran[pid] && Object.keys(gran[pid]).length){ tags[m][pid]={...gran[pid]}; nbGranular++; nbTags+=Object.keys(gran[pid]).length; }
+        else if(reel && reel!==0){ tags[m][pid]={"Import GSheet":reel}; nbTags++; }
+      }
+      if(!Object.keys(tags[m]).length) delete tags[m]; else moisSemes++;
+    }
+    const soldeReel = (parsed.soldeReel||[]).map((v,i)=> i>realizedMax ? null : v);
+    const mm=["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."];
+    const warnings=[];
+    (parsed.revenusNonMappes||[]).forEach(rn=>{ const nz=rn.valeurs.map((v,i)=>v?`${mm[i]} ${v}`:null).filter(Boolean); const tot=rn.valeurs.reduce((a,b)=>a+b,0); if(tot) warnings.push(`Revenu sans nom (ligne ${rn.row}) : ${nz.join(", ")} — total ${tot} € — non importé. Ajoute-le à la main après import, ou dis-moi son poste.`); });
+    (parsed.unmapped||[]).forEach(u=>warnings.push(`Ligne « ${u.label} » (ligne ${u.row}) non reconnue — non importée.`));
+    return { annee:parsed.annee, soldeDepart:parsed.soldeDepart, soldeReel, lignes, tags, warnings, stats:{nbPostes:Object.keys(lignes).length, nbTags, nbGranular, filled:moisSemes} };
+  }
+
   function renderData() {
     const ys = Object.keys(YEARS).map(Number).sort((a,b)=>a-b);
     const pendCount = bankPending().length;
@@ -1073,10 +1177,9 @@
         </div>
         <div class="data-card">
           <h3>Importer une année</h3>
-          <p>Sélectionne le fichier d'année que je t'ai fourni, choisis l'année concernée, puis importe.
-             Les données restent dans ce navigateur.</p>
+          <p>Sélectionne ton classeur <strong>.xlsx</strong> (ou le .json fourni) : je te montre exactement ce que j'ai compris — grille, soldes, réel — <strong>avant</strong> d'écrire quoi que ce soit. Tout reste dans ce navigateur.</p>
           <div class="field">
-            <input type="file" id="yearFile" accept="application/json,.json">
+            <input type="file" id="yearFile" accept=".xlsx,application/json,.json">
           </div>
           <div class="field">
             <label for="yearTarget">Année :</label>
@@ -1084,6 +1187,7 @@
             <button class="btn" id="doYearImport">Importer cette année</button>
           </div>
           <p id="yearMsg" class="msg"></p>
+          <div id="xlsxConfirm" class="xlsx-confirm" hidden></div>
           <ul class="year-list">
             ${ys.length ? ys.map(y=>`<li><span>${y}</span><button class="del" data-delyear="${y}">supprimer</button></li>`).join("") : `<li class="muted">Aucune année pour l'instant.</li>`}
           </ul>
@@ -1165,13 +1269,68 @@
       };
       r.readAsText(f);
     };
-    // Préselectionner l'année si le fichier en contient une
+    // À la sélection : .xlsx -> lecture + écran de contrôle ; .json -> préselection de l'année
     el("#yearFile").onchange = () => {
-      const f = el("#yearFile").files[0]; if (!f) return;
-      const r = new FileReader();
-      r.onload = () => { try { const d=JSON.parse(r.result); if (d.year) el("#yearTarget").value=String(d.year); } catch {} };
-      r.readAsText(f);
+      const f = el("#yearFile").files[0]; const conf = el("#xlsxConfirm"); if (conf){ conf.hidden=true; conf.innerHTML=""; }
+      if (!f) return;
+      if (/\.xlsx$/i.test(f.name)) {
+        const msg = el("#yearMsg"); msg.className="msg"; msg.textContent="Lecture du classeur…";
+        const r = new FileReader();
+        r.onload = () => {
+          try {
+            if (typeof XLSX === "undefined") throw new Error("SheetJS non chargé");
+            const wb = XLSX.read(new Uint8Array(r.result), { type:"array" });
+            const imp = buildXlsxImport(parseWorkbook(wb));
+            msg.textContent = ""; renderXlsxConfirm(imp);
+          } catch(e){ msg.className="msg err"; msg.textContent="Classeur illisible ("+(e.message||e)+"). Vérifie que c'est bien ton .xlsx budget."; }
+        };
+        r.readAsArrayBuffer(f);
+      } else {
+        const r = new FileReader();
+        r.onload = () => { try { const d=JSON.parse(r.result); if (d.year) el("#yearTarget").value=String(d.year); } catch {} };
+        r.readAsText(f);
+      }
     };
+
+    // Écran de contrôle : affiche ce qui a été détecté, écrit seulement sur « Confirmer »
+    function renderXlsxConfirm(imp){
+      const y = imp.annee || Number(el("#yearTarget").value);
+      const sel = el("#yearTarget"); if (sel) sel.value = String(y);
+      const mm = ["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."];
+      const srLine = imp.soldeReel.map((v,i)=> v==null?null:`${mm[i]} ${Math.round(v)}`).filter(Boolean).join(" · ");
+      const rows = Object.keys(imp.lignes).map(pid=>{
+        const tot = imp.lignes[pid].reduce((a,b)=>a+(b||0),0);
+        let nbEtiq=0; for(const m in imp.tags){ if(imp.tags[m][pid]) nbEtiq+=Object.keys(imp.tags[m][pid]).length; }
+        const nom = (POSTES[pid]&&POSTES[pid].label)||pid;
+        return `<tr><td>${nom}</td><td class="num">${fmt(tot)}</td><td class="num muted">${nbEtiq||""}</td></tr>`;
+      }).join("");
+      const warn = imp.warnings.length ? `<div class="xlsx-warn">${imp.warnings.map(w=>"⚠ "+w).join("<br>")}</div>` : "";
+      const dejaLa = YEARS[y] ? `<div class="xlsx-warn">⚠ L'année ${y} existe déjà : confirmer remplacera sa grille et son réel importés (les dépenses déjà triées de cette année reviendront à l'état importé).</div>` : "";
+      const conf = el("#xlsxConfirm");
+      conf.innerHTML = `
+        <div class="xlsx-confirm__head"><strong>Vérifie avant d'importer</strong> <span class="muted">— rien n'est encore écrit</span></div>
+        <p class="xlsx-sum">Année <b>${y}</b> · <b>${imp.stats.nbPostes}</b> postes · ${imp.stats.filled} mois remplis · solde de départ <b>${fmt(imp.soldeDepart)}</b></p>
+        <p class="xlsx-sum">Réel semé : <b>${imp.stats.nbTags}</b> étiquettes (dont ${imp.stats.nbGranular} ventilations fines Courses / Tan).</p>
+        <p class="xlsx-sum">Solde réel du compte : ${srLine||"—"}</p>
+        ${warn}${dejaLa}
+        <details class="xlsx-det"><summary>Détail par poste (${imp.stats.nbPostes})</summary>
+          <table class="xlsx-table"><thead><tr><th>Poste</th><th class="num">Total année</th><th class="num">Étiq.</th></tr></thead><tbody>${rows}</tbody></table>
+        </details>
+        <div class="xlsx-actions">
+          <button class="btn btn--ghost" id="xlsxCancel">Annuler</button>
+          <button class="btn btn--accent" id="xlsxOk">Confirmer et importer</button>
+        </div>`;
+      conf.hidden = false;
+      el("#xlsxCancel").onclick = () => { conf.hidden=true; conf.innerHTML=""; const m=el("#yearMsg"); m.className="msg"; m.textContent="Import annulé."; el("#yearFile").value=""; };
+      el("#xlsxOk").onclick = () => {
+        YEARS[y] = { soldeDepart: imp.soldeDepart ?? 0, lignes: imp.lignes, soldeReel: imp.soldeReel || [] };
+        tags[y] = {};
+        for(const m in imp.tags){ tags[y][m]={}; for(const pid in imp.tags[m]){ tags[y][m][pid]={...imp.tags[m][pid]}; } }
+        save(K.years, YEARS); save(K.tags, tags);
+        anneeCourante = y; moisCourant = defaultMonth(y);
+        initYearSelect(); renderAll();
+      };
+    }
     // Suppression d'une année
     els("[data-delyear]").forEach(b => b.onclick = () => {
       const y = Number(b.dataset.delyear);
@@ -1269,6 +1428,7 @@
 
   /* ---------- Démarrage ---------- */
   refreshAnnees();
+  moisCourant = defaultMonth(anneeCourante);
   initMenu();
   initTabs();
   initYearSelect();

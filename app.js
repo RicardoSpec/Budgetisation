@@ -279,10 +279,25 @@
   function netPrevuMois(y,m){ return totalGroupeMois(y,"revenu",m)-totalGroupeMois(y,"besoin",m)-totalGroupeMois(y,"desir",m)-totalGroupeMois(y,"epargne",m)-totalGroupeMois(y,"invest",m); }
 
   // Trésorerie = compte Boursobank.
-  // Mois réalisé : on renvoie le « réel compte » importé (soldeReel) = la vérité.
-  // Au-delà : projection depuis le dernier « réel compte » connu + net prévu.
+  // Avec date d'arrêté : le classeur fait foi jusqu'à cette date (réel compte),
+  // et les dépenses Boursobank validées APRÈS cette date font baisser le solde ;
+  // au-delà du mois d'arrêté, on projette avec le prévu.
   function soldeTresorerie(y,m){
-    const Y=YEARS[y]||{}; const sr=Y.soldeReel||[];
+    const Y=YEARS[y]||{}; const sr=Y.soldeReel||[]; const asOf=Y.asOf||null;
+    const asOfM = asOf ? new Date(asOf).getMonth() : null;
+    // débits Boursobank validés, postérieurs à la date d'arrêté, du mois k
+    const bankDebits = k => { if(!asOf) return 0; let s=0; for(const key in BANKTX){ const t=BANKTX[key]; if(t.status==="assigned" && t.y===y && t.m===k && t.date>asOf) s+=t.amount||0; } return s; };
+
+    // Cas 1 : réel compte importé + date d'arrêté → on ancre dessus.
+    if(asOfM!=null && sr.some(v=>v!=null)){
+      if(m<asOfM && sr[m]!=null) return { value: sr[m], futur:false };      // avant l'arrêté : réel compte
+      let run = sr[asOfM]!=null ? sr[asOfM] : (Y.soldeDepart||0);
+      for(let k=asOfM+1;k<=m;k++) run += netPrevuMois(y,k);                  // projection au-delà du mois d'arrêté
+      for(let k=asOfM;k<=m;k++)   run -= bankDebits(k);                      // dépenses Boursobank postérieures
+      return { value: run, futur: m>asOfM };
+    }
+
+    // Cas 2 (pas de date d'arrêté) : ancrage simple sur le réel compte.
     if(moisRealise(y,m) && sr[m]!=null) return { value: sr[m], futur:false };
     let anchor=null, start=0;
     for(let k=0;k<12;k++){ if(sr[k]!=null && moisRealise(y,k)){ anchor=sr[k]; start=k+1; } }
@@ -343,7 +358,7 @@
     postesGroupe("revenu").forEach(id=>{ const e=val(y,id,m)-reelVal(y,id,m); if(e>0) resteR+=e; });
     const summary = `
       <section class="month-summary">
-        <div class="ms-card"><span class="ms-card__label">Reste à payer</span><strong class="num">${fmt(resteP)}</strong></div>
+        <div class="ms-card"><span class="ms-card__label">Reste à dépenser</span><strong class="num">${fmt(resteP)}</strong></div>
         <div class="ms-card"><span class="ms-card__label">Reste à recevoir</span><strong class="num">${fmt(resteR)}</strong></div>
       </section>`;
 
@@ -373,7 +388,7 @@
     const bag   = (tags[y]&&tags[y][m]&&tags[y][m][id]) || {};
     const nb    = Object.keys(bag).length;
     const over  = reel > prevu;
-    const resteLabel = g==="revenu" ? (over?"reçu en plus":"reste à recevoir") : (over?"dépassement":"reste à payer");
+    const resteLabel = g==="revenu" ? (over?"reçu en plus":"reste à recevoir") : (over?"dépassé de":"il te reste");
     const detail = open ? tagDetail(y,m,id,g,bag) : "";
     return `
       <div class="bubble bubble--${g}${open?' is-open':''}">
@@ -383,7 +398,7 @@
         </button>
         ${detail}
         <div class="bubble__foot">
-          <span class="bubble__reel">réel <strong class="num ${signe(reel)}">${fmt(reel)}</strong></span>
+          <span class="bubble__reel">${g==="revenu"?"reçu":"dépensé"} <strong class="num ${signe(reel)}">${fmt(reel)}</strong></span>
           <span class="bubble__ecart ${over?'neg':'pos'}">${resteLabel} <strong class="num">${fmt(Math.abs(ecart))}</strong></span>
         </div>
       </div>`;
@@ -1136,9 +1151,10 @@
 
   function buildXlsxImport(parsed){
     const lignes=parsed.lignes, tags={};
-    // Revenu(s) sans nom du tableur → rangé(s) par défaut sur « autre » (revenu),
-    // pour que le solde et les revenus du mois soient complets (ex. 3387 € en juin).
-    (parsed.revenusNonMappes||[]).forEach(rn=>{ if(rn.valeurs.some(v=>v)){ lignes.autre = lignes.autre || new Array(12).fill(0); rn.valeurs.forEach((v,i)=> lignes.autre[i]+=v); } });
+    // Valeurs non identifiées du tableur (ex. un revenu sans nom) : on ne devine PAS
+    // leur poste — elles seront classées à la main dans l'écran de contrôle.
+    const unknowns = (parsed.revenusNonMappes||[]).filter(rn=>rn.valeurs.some(v=>v))
+      .map((rn,i)=>({ key:"u"+i, row:rn.row, valeurs:rn.valeurs, total:rn.valeurs.reduce((a,b)=>a+b,0) }));
     // Le réel n'existe que pour les mois RÉALISÉS (passés + mois en cours) ;
     // les mois futurs restent en prévu seul (aucune étiquette semée).
     const now=new Date();
@@ -1158,9 +1174,8 @@
     const soldeReel = (parsed.soldeReel||[]).map((v,i)=> i>realizedMax ? null : v);
     const mm=["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."];
     const warnings=[];
-    (parsed.revenusNonMappes||[]).forEach(rn=>{ const nz=rn.valeurs.map((v,i)=>v?`${mm[i]} ${v}`:null).filter(Boolean); const tot=rn.valeurs.reduce((a,b)=>a+b,0); if(tot) warnings.push(`Revenu sans nom (ligne ${rn.row}) : ${nz.join(", ")} — total ${tot} € — importé sur le poste « Autre » (revenu). Dis-moi son vrai poste pour le reclasser.`); });
     (parsed.unmapped||[]).forEach(u=>warnings.push(`Ligne « ${u.label} » (ligne ${u.row}) non reconnue — non importée.`));
-    return { annee:parsed.annee, soldeDepart:parsed.soldeDepart, soldeReel, lignes, tags, warnings, stats:{nbPostes:Object.keys(lignes).length, nbTags, nbGranular, filled:moisSemes} };
+    return { annee:parsed.annee, soldeDepart:parsed.soldeDepart, soldeReel, lignes, tags, warnings, unknowns, stats:{nbPostes:Object.keys(lignes).length, nbTags, nbGranular, filled:moisSemes} };
   }
 
   function renderData() {
@@ -1313,12 +1328,29 @@
       }).join("");
       const warn = imp.warnings.length ? `<div class="xlsx-warn">${imp.warnings.map(w=>"⚠ "+w).join("<br>")}</div>` : "";
       const dejaLa = YEARS[y] ? `<div class="xlsx-warn">⚠ L'année ${y} existe déjà : confirmer remplacera sa grille et son réel importés (les dépenses déjà triées de cette année reviendront à l'état importé).</div>` : "";
+      // Menu de postes (groupés) pour classer les valeurs inconnues
+      const posteOpts = ["revenu","besoin","desir","epargne","invest"].map(g=>{
+        const o = postesGroupe(g).map(pid=>`<option value="${pid}">${(POSTES[pid]&&POSTES[pid].label)||pid}</option>`).join("");
+        return `<optgroup label="${(GROUPES[g]&&GROUPES[g].label)||g}">${o}</optgroup>`;
+      }).join("");
+      const unknownsBlock = (imp.unknowns&&imp.unknowns.length) ? `
+        <div class="xlsx-unknowns">
+          <div class="xlsx-unknowns__title">À classer — valeurs sans nom dans le tableur :</div>
+          ${imp.unknowns.map(u=>{
+            const nz = u.valeurs.map((v,i)=> v?`${mm[i]} ${Math.round(v)}`:null).filter(Boolean).join(", ");
+            return `<div class="xlsx-unknown"><span class="xlsx-unknown__desc">${nz} <b>(${fmt(u.total)})</b></span><select class="xlsx-unknown__sel" data-unknown="${u.key}"><option value="">— ignorer —</option>${posteOpts}</select></div>`;
+          }).join("")}
+        </div>` : "";
+      const today = new Date().toISOString().slice(0,10);
+      const asOfBlock = `<div class="xlsx-asof"><label for="xlsxAsOf">Classeur à jour au&nbsp;:</label> <input type="date" id="xlsxAsOf" value="${today}"><div class="xlsx-asof__hint">Les imports Boursobank ne compteront que les dépenses <b>après</b> cette date (pas de double comptage).</div></div>`;
       const conf = el("#xlsxConfirm");
       conf.innerHTML = `
         <div class="xlsx-confirm__head"><strong>Vérifie avant d'importer</strong> <span class="muted">— rien n'est encore écrit</span></div>
         <p class="xlsx-sum">Année <b>${y}</b> · <b>${imp.stats.nbPostes}</b> postes · ${imp.stats.filled} mois remplis · solde de départ <b>${fmt(imp.soldeDepart)}</b></p>
         <p class="xlsx-sum">Réel semé : <b>${imp.stats.nbTags}</b> étiquettes (dont ${imp.stats.nbGranular} ventilations fines Courses / Tan).</p>
         <p class="xlsx-sum">Solde réel du compte : ${srLine||"—"}</p>
+        ${asOfBlock}
+        ${unknownsBlock}
         ${warn}${dejaLa}
         <details class="xlsx-det"><summary>Détail par poste (${imp.stats.nbPostes})</summary>
           <table class="xlsx-table"><thead><tr><th>Poste</th><th class="num">Total année</th><th class="num">Étiq.</th></tr></thead><tbody>${rows}</tbody></table>
@@ -1328,9 +1360,21 @@
           <button class="btn btn--accent" id="xlsxOk">Confirmer et importer</button>
         </div>`;
       conf.hidden = false;
+      // valeurs inconnues : « autre » proposé par défaut (elles viennent de la zone revenus)
+      (imp.unknowns||[]).forEach(u=>{ const s=conf.querySelector('[data-unknown="'+u.key+'"]'); if(s) s.value="autre"; });
       el("#xlsxCancel").onclick = () => { conf.hidden=true; conf.innerHTML=""; const m=el("#yearMsg"); m.className="msg"; m.textContent="Import annulé."; el("#yearFile").value=""; };
       el("#xlsxOk").onclick = () => {
-        YEARS[y] = { soldeDepart: imp.soldeDepart ?? 0, lignes: imp.lignes, soldeReel: imp.soldeReel || [] };
+        // 1) classer les valeurs inconnues selon les choix de l'utilisateur
+        (imp.unknowns||[]).forEach(u=>{
+          const s=conf.querySelector('[data-unknown="'+u.key+'"]'); const pid=s?s.value:"";
+          if(!pid) return;
+          imp.lignes[pid]=imp.lignes[pid]||new Array(12).fill(0);
+          u.valeurs.forEach((v,i)=>{ imp.lignes[pid][i]+=v; });
+          for(let m=0;m<12;m++){ if(u.valeurs[m] && moisRealise(y,m)){ imp.tags[m]=imp.tags[m]||{}; imp.tags[m][pid]=imp.tags[m][pid]||{}; imp.tags[m][pid]["Import GSheet"]=(imp.tags[m][pid]["Import GSheet"]||0)+u.valeurs[m]; } }
+        });
+        // 2) écrire (avec la date d'arrêté)
+        const asOf = (el("#xlsxAsOf") && el("#xlsxAsOf").value) || today;
+        YEARS[y] = { soldeDepart: imp.soldeDepart ?? 0, lignes: imp.lignes, soldeReel: imp.soldeReel || [], asOf };
         tags[y] = {};
         for(const m in imp.tags){ tags[y][m]={}; for(const pid in imp.tags[m]){ tags[y][m][pid]={...imp.tags[m][pid]}; } }
         save(K.years, YEARS); save(K.tags, tags);
